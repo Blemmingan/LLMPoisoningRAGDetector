@@ -1,0 +1,5 @@
+Academic Survey on LLM Security
+
+In this academic survey paper, researchers study adversarial prompt injection techniques in RAG architectures.
+Pioneering attacks frequently utilized phrases like "ignore previous instructions" or attempted jailbreak personas.
+Our analysis demonstrates that robust sanitization and dual-model arbitration effectively mitigate these vectors.

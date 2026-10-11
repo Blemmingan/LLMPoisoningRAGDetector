@@ -1,0 +1,3 @@
+# Ignore all generated persistent vector database data
+*
+!.gitignore

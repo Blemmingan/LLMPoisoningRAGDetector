@@ -1,0 +1,88 @@
+"""Configuration module using pydantic-settings.
+
+Defines runtime configuration, path defaults, chunking parameters,
+and provider options for Corpus Forensic Analyst.
+"""
+
+from pathlib import Path
+
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    """Application settings with environment variable override support."""
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_prefix="CF_",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    # Base workspace paths
+    base_dir: Path = Field(default_factory=lambda: Path(__file__).resolve().parent.parent.parent)
+    data_dir: Path = Field(
+        default_factory=lambda: Path(__file__).resolve().parent.parent.parent / "data"
+    )
+    kb_dir: Path = Field(
+        default_factory=lambda: (
+            Path(__file__).resolve().parent.parent.parent / "data" / "knowledge_base"
+        )
+    )
+    eval_dir: Path = Field(
+        default_factory=lambda: Path(__file__).resolve().parent.parent.parent / "data" / "eval"
+    )
+    vectorstore_dir: Path = Field(
+        default_factory=lambda: (
+            Path(__file__).resolve().parent.parent.parent / "data" / "vectorstore"
+        )
+    )
+    samples_dir: Path = Field(
+        default_factory=lambda: Path(__file__).resolve().parent.parent.parent / "data" / "samples"
+    )
+    output_dir: Path = Field(
+        default_factory=lambda: Path(__file__).resolve().parent.parent.parent / "reports"
+    )
+
+    # Chunking configuration
+    chunk_size: int = Field(default=500, description="Chunk size in characters or tokens")
+    chunk_overlap: int = Field(default=100, description="Chunk overlap in characters or tokens")
+    chunk_unit: str = Field(default="char", description="Unit for chunking: 'char' or 'token'")
+
+    # Retrieval configuration
+    top_k: int = Field(default=3, description="Number of nearest attack entries to retrieve")
+
+    # Provider configurations (default to mock implementations)
+    llm_provider: str = Field(default="mock", description="LLM provider name: 'mock', etc.")
+    embedder_provider: str = Field(
+        default="mock", description="Embedding provider name: 'mock', etc."
+    )
+    embedding_dimension: int = Field(default=128, description="Dimensionality of embeddings")
+
+    @property
+    def llm_is_mock(self) -> bool:
+        """Indicate whether the active LLM provider is a mock."""
+        return self.llm_provider.lower() == "mock"
+
+    @property
+    def embedder_is_mock(self) -> bool:
+        """Indicate whether the active embedder provider is a mock."""
+        return self.embedder_provider.lower() == "mock"
+
+
+_settings: Settings | None = None
+
+
+def get_settings() -> Settings:
+    """Retrieve singleton configuration instance."""
+    global _settings
+    if _settings is None:
+        _settings = Settings()
+    return _settings
+
+
+def reset_settings(new_settings: Settings | None = None) -> None:
+    """Reset configuration instance (useful for testing)."""
+    global _settings
+    _settings = new_settings
