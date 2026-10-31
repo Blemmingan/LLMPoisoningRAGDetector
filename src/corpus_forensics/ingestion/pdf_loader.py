@@ -6,7 +6,7 @@ from typing import Any
 from pypdf import PdfReader
 
 from corpus_forensics.ingestion.base import DocumentLoader, register_loader
-from corpus_forensics.schemas import Document
+from corpus_forensics.schemas import HIDDEN_SECTION_PDF_METADATA, Document
 
 
 class PdfLoader(DocumentLoader):
@@ -48,7 +48,7 @@ class PdfLoader(DocumentLoader):
         pdf_metadata: dict[str, Any] = dict(reader.metadata) if reader.metadata else {}
         meta_strings = [f"{k}: {v}" for k, v in pdf_metadata.items() if v]
         if meta_strings:
-            hidden_channel = "[PDF_METADATA]\n" + "\n".join(meta_strings)
+            hidden_channel = HIDDEN_SECTION_PDF_METADATA + "\n" + "\n".join(meta_strings)
 
         return Document(
             id=str(file_path),

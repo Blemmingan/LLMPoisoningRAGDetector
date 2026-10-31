@@ -34,7 +34,7 @@ This document outlines mandatory architecture rules, operational constraints, an
 ### Rule 5: Preservation of Spanish JSON Keys
 - The report schemas in `src/corpus_forensics/schemas.py` are part of a shared inter-service specification:
   - `DocumentReport`: `documento`, `malicioso`, `hallazgos`, `metadata de análisis`.
-  - `Hallazgo`: `tipo_de_ataque`, `fragmento_exacto`, `inicio_caracter`, `fin_caracter`, `indice_chunk`, `tecnica_de_ocultamiento`, `objetivo_del_atacante`, `severidad`, `confianza`, `ataque_similar_id`, `posible_variante_nueva`, `mitigacion`, `verificado`, `notas_verificacion`.
+  - `Hallazgo`: `tipo_de_ataque`, `fragmento_exacto`, `inicio_caracter`, `fin_caracter`, `canal`, `indice_chunk`, `tecnica_de_ocultamiento`, `objetivo_del_atacante`, `severidad`, `confianza`, `ataque_similar_id`, `posible_variante_nueva`, `mitigacion`, `verificado`, `notas_verificacion`.
 - **Do NOT alter or translate these Spanish keys into English.**
 - All internal code symbols, functions, variable names, and documentation must remain in English, but the serialized report keys must strictly adhere to the Spanish specification. If a field change is approved, update `schemas.py`, `json_writer.py`, `markdown_renderer.py`, `evaluation/metrics.py`, and test fixtures together.
 

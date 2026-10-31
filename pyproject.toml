@@ -7,7 +7,7 @@ name = "corpus-forensics"
 version = "0.1.0"
 description = "Corpus Poisoning Forensic Analyst (RAG-based)"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.14"
 authors = [
     { name = "Forensics Team" }
 ]

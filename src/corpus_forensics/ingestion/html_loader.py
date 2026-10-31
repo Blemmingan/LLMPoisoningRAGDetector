@@ -6,7 +6,11 @@ from pathlib import Path
 from bs4 import BeautifulSoup, Comment
 
 from corpus_forensics.ingestion.base import DocumentLoader, register_loader
-from corpus_forensics.schemas import Document
+from corpus_forensics.schemas import (
+    HIDDEN_SECTION_HIDDEN_ELEMENTS,
+    HIDDEN_SECTION_HTML_COMMENTS,
+    Document,
+)
 
 
 class HtmlLoader(DocumentLoader):
@@ -68,9 +72,11 @@ class HtmlLoader(DocumentLoader):
 
         hidden_channel_parts: list[str] = []
         if comments:
-            hidden_channel_parts.append("[HTML_COMMENTS]\n" + "\n".join(comments))
+            hidden_channel_parts.append(HIDDEN_SECTION_HTML_COMMENTS + "\n" + "\n".join(comments))
         if hidden_elements:
-            hidden_channel_parts.append("[HIDDEN_ELEMENTS]\n" + "\n".join(hidden_elements))
+            hidden_channel_parts.append(
+                HIDDEN_SECTION_HIDDEN_ELEMENTS + "\n" + "\n".join(hidden_elements)
+            )
 
         hidden_content = "\n\n".join(hidden_channel_parts)
 

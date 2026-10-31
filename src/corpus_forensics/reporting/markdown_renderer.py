@@ -51,8 +51,14 @@ def render_report_to_markdown(report: DocumentReport) -> str:
                 f"- **Técnica de Ocultamiento:** {', '.join(t.value for t in h.tecnica_de_ocultamiento)}"
             )
             lines.append(f"- **Objetivo del Atacante:** {h.objetivo_del_atacante}")
+            canal_label = (
+                "texto visible"
+                if h.canal.value == "visible"
+                else "canal oculto (comentarios HTML, elementos ocultos o metadata)"
+            )
+            lines.append(f"- **Ubicación:** {canal_label}")
             lines.append(
-                f"- **Offsets en Documento:** `[{h.inicio_caracter}:{h.fin_caracter}]` (Chunk #{h.indice_chunk})"
+                f"- **Offsets en el Canal:** `[{h.inicio_caracter}:{h.fin_caracter}]` (Chunk #{h.indice_chunk})"
             )
             lines.append(
                 f"- **Verificado contra Texto Fuente:** `{'SÍ (Coincidencia Literal)' if h.verificado else 'NO (Alerta Anti-Alucinación)'}`"

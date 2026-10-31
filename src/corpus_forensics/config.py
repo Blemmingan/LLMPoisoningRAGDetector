@@ -6,7 +6,7 @@ and provider options for Corpus Forensic Analyst.
 
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -59,6 +59,14 @@ class Settings(BaseSettings):
         default="mock", description="Embedding provider name: 'mock', etc."
     )
     embedding_dimension: int = Field(default=128, description="Dimensionality of embeddings")
+
+    # LiteLLM proxy (OpenAI-compatible) credentials and model names
+    llm_base_url: str | None = Field(default=None, description="Base URL of the LiteLLM proxy")
+    llm_api_key: SecretStr | None = Field(default=None, description="API key for the LiteLLM proxy")
+    llm_model: str | None = Field(default=None, description="Chat model name exposed by the proxy")
+    embedding_model: str | None = Field(
+        default=None, description="Embedding model name exposed by the proxy"
+    )
 
     @property
     def llm_is_mock(self) -> bool:

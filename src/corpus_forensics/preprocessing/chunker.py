@@ -51,14 +51,9 @@ class Chunker:
         Returns:
             List of Chunk objects with start/end character offsets and annotations.
         """
-        # Primary analysis is performed on visible_text, optionally augmented by hidden_content
-        text_to_chunk = document.visible_text
-        if document.hidden_content:
-            # Append hidden channel if present to ensure it is subjected to chunk retrieval
-            # Keep track: visible text remains source for literal matching
-            text_to_chunk = (
-                f"{document.visible_text}\n\n=== HIDDEN CHANNEL ===\n{document.hidden_content}"
-            )
+        # Visible text plus the hidden channel (if any), so hidden payloads are analyzed too.
+        # The verifier resolves each finding back to its channel and channel-relative offsets.
+        text_to_chunk = document.analyzed_text
 
         if not text_to_chunk:
             return []

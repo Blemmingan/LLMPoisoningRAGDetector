@@ -66,3 +66,37 @@ def test_pipeline_smoke_end_to_end(fixtures_dir: Path, tmp_path: Path) -> None:
 
     # 6. Non-parametric memory rule: Analyzed docs must NOT be persisted in vector store
     assert pipeline.vector_store.count() == 0
+
+
+def test_pipeline_flags_injection_in_html_comment(fixtures_dir: Path, tmp_path: Path) -> None:
+    """An injection hidden in an HTML comment must be verified and flag the document."""
+    from corpus_forensics.schemas import CanalDocumento
+
+    settings = Settings(
+        vectorstore_dir=tmp_path / "vectorstore",
+        output_dir=tmp_path / "reports",
+        chunk_size=200,
+        chunk_overlap=50,
+        chunk_unit="char",
+        top_k=2,
+    )
+    pipeline = ForensicPipeline(settings=settings)
+    html_file = fixtures_dir / "poisoned_hidden_comment.html"
+
+    report = pipeline.analyze_document(html_file)
+
+    assert report.malicioso is True
+    hidden = [h for h in report.hallazgos if h.canal == CanalDocumento.OCULTO]
+    assert hidden, "expected at least one finding located in the hidden channel"
+    assert all(h.verificado for h in hidden)
+    assert all("comentario_html" in h.tecnica_de_ocultamiento for h in hidden)
+
+    # Offsets point into the loaded hidden channel
+    from corpus_forensics.ingestion.base import get_loader_for_path
+
+    doc = get_loader_for_path(html_file).load(html_file)
+    for h in hidden:
+        assert doc.hidden_content[h.inicio_caracter : h.fin_caracter] == h.fragmento_exacto
+
+    md = render_report_to_markdown(report)
+    assert "canal oculto" in md

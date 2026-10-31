@@ -49,6 +49,13 @@ class Severidad(StrEnum):
     CRITICA = "critica"
 
 
+class CanalDocumento(StrEnum):
+    """Document channel where a finding was located."""
+
+    VISIBLE = "visible"
+    OCULTO = "oculto"
+
+
 class CategoriaDocumento(StrEnum):
     """Evaluation dataset category."""
 
@@ -77,6 +84,15 @@ class SutilezaAtaque(StrEnum):
 # Ingestion & Preprocessing Models
 # -----------------------------------------------------------------------------
 
+# Separator placed between the visible text and the hidden channel when both are
+# analyzed together. Shared by the chunker and the verifier so offsets stay consistent.
+HIDDEN_CHANNEL_SEPARATOR = "\n\n=== HIDDEN CHANNEL ===\n"
+
+# Section headers used by loaders inside `Document.hidden_content`.
+HIDDEN_SECTION_HTML_COMMENTS = "[HTML_COMMENTS]"
+HIDDEN_SECTION_HIDDEN_ELEMENTS = "[HIDDEN_ELEMENTS]"
+HIDDEN_SECTION_PDF_METADATA = "[PDF_METADATA]"
+
 
 class Document(BaseModel):
     """In-memory representation of an ingested document.
@@ -96,6 +112,24 @@ class Document(BaseModel):
         description="Loader identifier or mime/extension type (e.g., text, markdown, html, pdf)",
     )
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @property
+    def analyzed_text(self) -> str:
+        """Text actually sent through chunking and analysis.
+
+        The visible text, followed by the hidden channel (HTML comments, hidden
+        elements, PDF metadata) when present, so hidden payloads are also analyzed.
+        """
+        if not self.hidden_content:
+            return self.visible_text
+        return f"{self.visible_text}{HIDDEN_CHANNEL_SEPARATOR}{self.hidden_content}"
+
+    @property
+    def hidden_channel_start(self) -> int | None:
+        """Offset in `analyzed_text` where the hidden channel begins, or None."""
+        if not self.hidden_content:
+            return None
+        return len(self.visible_text) + len(HIDDEN_CHANNEL_SEPARATOR)
 
 
 class Chunk(BaseModel):
@@ -132,11 +166,18 @@ class Hallazgo(BaseModel):
     )
     inicio_caracter: int = Field(
         default=0,
-        description="Start character offset in the original document text",
+        description="Start character offset within the channel indicated by `canal`",
     )
     fin_caracter: int = Field(
         default=0,
-        description="End character offset in the original document text",
+        description="End character offset within the channel indicated by `canal`",
+    )
+    canal: CanalDocumento = Field(
+        default=CanalDocumento.VISIBLE,
+        description=(
+            "Channel where the fragment was found: 'visible' (rendered text) or 'oculto' "
+            "(HTML comments, hidden elements, PDF metadata)"
+        ),
     )
     indice_chunk: int = Field(
         default=0,
