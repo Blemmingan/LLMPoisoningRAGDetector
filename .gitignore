@@ -49,6 +49,10 @@ data/vectorstore/*
 # Generated forensic reports
 reports/
 
+# Local LLM response cache and usage ledger
+data/cache/
+data/usage/
+
 # IDE & OS files
 .DS_Store
 .vscode/

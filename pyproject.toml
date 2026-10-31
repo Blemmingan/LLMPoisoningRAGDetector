@@ -20,6 +20,7 @@ dependencies = [
     "lxml>=5.0.0",
     "pypdf>=4.0.0",
     "rich>=13.0.0",
+    "openai>=1.99",
 ]
 
 [project.scripts]

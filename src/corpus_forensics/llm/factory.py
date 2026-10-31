@@ -4,10 +4,12 @@ from collections.abc import Callable
 from typing import Any
 
 from corpus_forensics.llm.base import LLMClient
+from corpus_forensics.llm.litellm_client import LiteLLMClient
 from corpus_forensics.llm.mock import MockLLMClient
 
 _LLM_REGISTRY: dict[str, Callable[..., LLMClient] | type[LLMClient]] = {
     "mock": MockLLMClient,
+    "litellm": LiteLLMClient,
 }
 
 

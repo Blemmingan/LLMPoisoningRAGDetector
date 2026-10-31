@@ -12,7 +12,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from corpus_forensics.analysis.aggregator import FindingAggregator
-from corpus_forensics.analysis.analyst import ChunkAnalyst
+from corpus_forensics.analysis.analyst import LLM_ERROR_PREFIX, ChunkAnalyst
 from corpus_forensics.analysis.prompt_builder import PromptBuilder
 from corpus_forensics.analysis.retriever import AttackRetriever
 from corpus_forensics.analysis.verifier import FindingVerifier
@@ -71,7 +71,7 @@ class ForensicPipeline:
             top_k=self.settings.top_k,
         )
 
-        self.prompt_builder = PromptBuilder()
+        self.prompt_builder = PromptBuilder(output_language=self.settings.report_language)
         self.analyst = ChunkAnalyst(
             llm_client=self.llm_client,
             prompt_builder=self.prompt_builder,
@@ -121,6 +121,13 @@ class ForensicPipeline:
             loader_used=loader.name,
             llm_is_mock=self.llm_client.is_mock,
             embedder_is_mock=self.embedder.is_mock,
+            llm_provider=self.llm_client.provider_name,
+            llm_model=getattr(self.llm_client, "model", None),
+            n_chunks_failed=sum(
+                1
+                for cf in chunk_findings
+                if (cf.analyst_reasoning or "").startswith(LLM_ERROR_PREFIX)
+            ),
         )
 
         return DocumentReport(

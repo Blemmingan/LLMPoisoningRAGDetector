@@ -215,6 +215,45 @@ class Hallazgo(BaseModel):
     )
 
 
+class HallazgoLLM(BaseModel):
+    """Finding exactly as emitted by the analyst LLM.
+
+    Contains only what the model decides. Offsets, channel, chunk index and verification
+    are filled in afterwards by the pipeline. Kept free of defaults and numeric
+    constraints so it is compatible with OpenAI strict structured outputs.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    tipo_de_ataque: TipoDeAtaque = Field(description="Attack category")
+    fragmento_exacto: str = Field(
+        description="Verbatim substring of the chunk that carries the attack; never paraphrase"
+    )
+    tecnica_de_ocultamiento: list[TecnicaDeOcultamiento] = Field(
+        description="Concealment techniques observed; ['ninguna'] if none"
+    )
+    objetivo_del_atacante: str = Field(description="What the attacker wants the model to do")
+    severidad: Severidad = Field(description="Assessed severity")
+    confianza: float = Field(description="Confidence between 0.0 and 1.0")
+    ataque_similar_id: str | None = Field(
+        description="ID of the most similar retrieved known attack, or null if none applies"
+    )
+    posible_variante_nueva: bool = Field(
+        description="True if no retrieved known attack is a close match"
+    )
+    mitigacion: str = Field(description="Concrete mitigation for this finding")
+
+
+class AnalisisChunkLLM(BaseModel):
+    """Structured answer requested from the analyst LLM for one chunk."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    razonamiento: str = Field(description="Brief rationale, at most two sentences")
+    malicioso: bool = Field(description="True if the chunk contains an active attack")
+    hallazgos: list[HallazgoLLM] = Field(description="Findings; empty list if the chunk is clean")
+
+
 class ChunkFinding(BaseModel):
     """Raw per-chunk structured finding emitted by the analyst LLM before aggregation."""
 
@@ -238,6 +277,11 @@ class AnalisisMetadata(BaseModel):
     loader_used: str = Field(description="Document loader identifier")
     llm_is_mock: bool = Field(description="Flag indicating if the LLM provider is a mock")
     embedder_is_mock: bool = Field(description="Flag indicating if the embedder provider is a mock")
+    llm_provider: str = Field(default="mock", description="LLM provider used")
+    llm_model: str | None = Field(default=None, description="Chat model used, if any")
+    n_chunks_failed: int = Field(
+        default=0, description="Chunks whose LLM analysis failed and were treated as clean"
+    )
     timestamp: str = Field(
         default_factory=lambda: datetime.now(UTC).isoformat(),
         description="ISO 8601 UTC timestamp of analysis completion",

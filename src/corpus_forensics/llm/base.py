@@ -8,6 +8,14 @@ from pydantic import BaseModel
 T = TypeVar("T", bound=BaseModel)
 
 
+class LLMError(Exception):
+    """Raised when an LLM call fails or returns an unusable response."""
+
+
+class BudgetExceededError(LLMError):
+    """Raised before a paid call when the configured spending cap has been reached."""
+
+
 class LLMClient(ABC):
     """Abstract interface for LLM providers supporting structured output generation."""
 

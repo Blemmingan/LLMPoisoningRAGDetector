@@ -7,8 +7,10 @@ from pydantic import BaseModel
 
 from corpus_forensics.llm.base import LLMClient
 from corpus_forensics.schemas import (
+    AnalisisChunkLLM,
     ChunkFinding,
     Hallazgo,
+    HallazgoLLM,
     Severidad,
     TecnicaDeOcultamiento,
     TipoDeAtaque,
@@ -69,6 +71,20 @@ class MockLLMClient(LLMClient):
 
     def generate_structured(self, prompt: str, schema: type[T]) -> T:
         """# MOCK Generate structured output using deterministic heuristics."""
+        if issubclass(schema, AnalisisChunkLLM):
+            finding = self._analyze_chunk_finding(prompt)
+            llm_fields = set(HallazgoLLM.model_fields)
+            return schema.model_validate(
+                {
+                    "razonamiento": finding.analyst_reasoning or "",
+                    "malicioso": finding.malicioso,
+                    "hallazgos": [
+                        {k: v for k, v in h.model_dump().items() if k in llm_fields}
+                        for h in finding.hallazgos
+                    ],
+                }
+            )
+
         if issubclass(schema, ChunkFinding):
             finding = self._analyze_chunk_finding(prompt)
             # Safe cast/validation

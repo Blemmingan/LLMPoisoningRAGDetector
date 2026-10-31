@@ -44,6 +44,14 @@ class Settings(BaseSettings):
     output_dir: Path = Field(
         default_factory=lambda: Path(__file__).resolve().parent.parent.parent / "reports"
     )
+    cache_dir: Path = Field(
+        default_factory=lambda: Path(__file__).resolve().parent.parent.parent / "data" / "cache"
+    )
+    usage_ledger_path: Path = Field(
+        default_factory=lambda: (
+            Path(__file__).resolve().parent.parent.parent / "data" / "usage" / "ledger.jsonl"
+        )
+    )
 
     # Chunking configuration
     chunk_size: int = Field(default=500, description="Chunk size in characters or tokens")
@@ -66,6 +74,21 @@ class Settings(BaseSettings):
     llm_model: str | None = Field(default=None, description="Chat model name exposed by the proxy")
     embedding_model: str | None = Field(
         default=None, description="Embedding model name exposed by the proxy"
+    )
+    report_language: str = Field(
+        default="es",
+        description="Language for free-text report fields ('es', 'en', 'pt' or a language name)",
+    )
+    llm_temperature: float = Field(default=0.0, description="Sampling temperature")
+    llm_max_output_tokens: int = Field(default=800, description="Max output tokens per call")
+    llm_timeout_s: float = Field(default=60.0, description="Request timeout in seconds")
+
+    # Spending control (the team budget on the proxy is USD 10 in total)
+    llm_cache_enabled: bool = Field(
+        default=True, description="Reuse identical model calls from the on-disk cache"
+    )
+    budget_limit_usd: float = Field(
+        default=8.0, description="Local spending cap; paid calls stop once it is reached"
     )
 
     @property

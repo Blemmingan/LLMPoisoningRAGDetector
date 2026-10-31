@@ -13,6 +13,7 @@ from corpus_forensics.config import get_settings
 from corpus_forensics.embeddings.factory import get_embedder
 from corpus_forensics.evaluation.harness import EvaluationHarness
 from corpus_forensics.knowledge_base.ingest import ingest_knowledge_base
+from corpus_forensics.llm.litellm_client import build_usage_tracker
 from corpus_forensics.reporting.json_writer import write_json_report
 from corpus_forensics.reporting.markdown_renderer import write_markdown_report
 from corpus_forensics.vectorstore.chroma_store import ChromaVectorStore
@@ -262,6 +263,65 @@ def eval_run(
     console.print(metrics_table)
     rprint(f"\n[dim]Summary JSON written to: {results['json_summary']}[/dim]")
     rprint(f"[dim]Summary Markdown written to: {results['markdown_summary']}[/dim]")
+
+
+# -----------------------------------------------------------------------------
+# usage command
+# -----------------------------------------------------------------------------
+
+
+@app.command(name="usage")
+def usage(
+    remote: Annotated[
+        bool,
+        typer.Option(
+            "--remote/--no-remote",
+            help="Also query the proxy for the team spend (free, no tokens used).",
+        ),
+    ] = True,
+) -> None:
+    """Show model usage and cost from the local ledger and, optionally, the team budget."""
+    settings = get_settings()
+    tracker = build_usage_tracker(settings)
+    records = tracker.read_records()
+
+    paid = [r for r in records if not r.cached]
+    table = Table(title="Local usage ledger")
+    table.add_column("Metric", style="cyan")
+    table.add_column("Value", justify="right", style="bold")
+    table.add_row("Paid calls", str(len(paid)))
+    table.add_row("Cache hits", str(len(records) - len(paid)))
+    table.add_row("Prompt tokens", str(sum(r.prompt_tokens for r in paid)))
+    table.add_row("Completion tokens", str(sum(r.completion_tokens for r in paid)))
+    table.add_row("Cost (USD)", f"{tracker.total_cost_usd:.4f}")
+    table.add_row("Local cap (USD)", f"{settings.budget_limit_usd:.2f}")
+    console.print(table)
+
+    if not remote:
+        return
+    if not settings.llm_base_url or settings.llm_api_key is None:
+        rprint("[yellow]Proxy not configured; skipping team spend.[/yellow]")
+        return
+
+    import httpx
+
+    headers = {"x-litellm-api-key": settings.llm_api_key.get_secret_value()}
+    base = settings.llm_base_url.rstrip("/")
+    try:
+        key_info = httpx.get(f"{base}/key/info", headers=headers, timeout=30).json()
+        team_id = key_info.get("info", {}).get("team_id")
+        team = httpx.get(
+            f"{base}/team/info", params={"team_id": team_id}, headers=headers, timeout=30
+        ).json()
+        info = team.get("team_info", team)
+        spend = float(info.get("spend") or 0.0)
+        budget = info.get("max_budget")
+        rprint(
+            f"Team [bold]{info.get('team_alias')}[/bold]: spent [bold]{spend:.4f}[/bold] USD"
+            + (f" of {float(budget):.2f} USD" if budget is not None else "")
+        )
+    except (httpx.HTTPError, ValueError) as exc:
+        rprint(f"[yellow]Could not read team spend from proxy: {exc}[/yellow]")
 
 
 if __name__ == "__main__":

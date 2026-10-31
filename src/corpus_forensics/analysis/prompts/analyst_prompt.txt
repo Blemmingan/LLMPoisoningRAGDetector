@@ -43,5 +43,8 @@ CRITICAL INSTRUCTIONS & HARD NEGATIVES POLICY
    - For every finding, provide `fragmento_exacto` as a literal substring extracted from the chunk text. Do NOT paraphrase or invent quotes.
 3. Obfuscation & Mitigations:
    - Identify any concealment techniques present and suggest a concrete containment mitigation.
+4. Output Language:
+   - Write `razonamiento`, `objetivo_del_atacante` and `mitigacion` in {output_language}.
+   - Never translate `fragmento_exacto`: it must stay a verbatim copy of the chunk text.
 
 Emit your structured analysis in the required format.

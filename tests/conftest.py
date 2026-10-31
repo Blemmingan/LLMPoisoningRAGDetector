@@ -11,6 +11,16 @@ from corpus_forensics.schemas import Document
 from corpus_forensics.vectorstore.chroma_store import ChromaVectorStore
 
 
+@pytest.fixture(autouse=True)
+def _force_offline_providers(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Never let the test suite reach the paid proxy, whatever the local .env says.
+
+    Environment variables take precedence over the .env file in pydantic-settings.
+    """
+    monkeypatch.setenv("CF_LLM_PROVIDER", "mock")
+    monkeypatch.setenv("CF_EMBEDDER_PROVIDER", "mock")
+
+
 @pytest.fixture
 def fixtures_dir() -> Path:
     """Path to the test fixtures directory."""

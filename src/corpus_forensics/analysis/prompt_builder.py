@@ -6,16 +6,28 @@ from corpus_forensics.schemas import Chunk, RetrievedAttack
 
 PROMPT_TEMPLATE_PATH = Path(__file__).resolve().parent / "prompts" / "analyst_prompt.txt"
 
+# ISO codes accepted in CF_REPORT_LANGUAGE; any other value is passed to the prompt as-is.
+LANGUAGE_NAMES = {"es": "Spanish", "en": "English", "pt": "Portuguese"}
+
+
+def language_name(code: str) -> str:
+    """Translate a language code (e.g. 'es') into the name used in the prompt."""
+    return LANGUAGE_NAMES.get(code.lower(), code)
+
 
 class PromptBuilder:
     """Constructs forensic analysis prompts using external templates."""
 
-    def __init__(self, template_path: Path | str = PROMPT_TEMPLATE_PATH) -> None:
+    def __init__(
+        self, template_path: Path | str = PROMPT_TEMPLATE_PATH, output_language: str = "es"
+    ) -> None:
         """Initialize prompt builder.
 
         Args:
             template_path: Path to the prompt template file.
+            output_language: Language code for the free-text fields of the report.
         """
+        self.output_language = language_name(output_language)
         self.template_path = Path(template_path)
         if not self.template_path.exists():
             raise FileNotFoundError(f"Analyst prompt template not found at {self.template_path}")
@@ -48,6 +60,7 @@ class PromptBuilder:
             chunk_text=chunk.text,
             preprocessing_annotations=annotations_summary,
             retrieved_attacks=retrieved_summary,
+            output_language=self.output_language,
         )
 
     def _format_annotations(self, annotations: dict) -> str:
