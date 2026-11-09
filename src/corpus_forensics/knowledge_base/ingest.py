@@ -5,6 +5,7 @@ from typing import Any
 
 from corpus_forensics.config import get_settings
 from corpus_forensics.embeddings.base import Embedder
+from corpus_forensics.knowledge_base.labeling import label_entries
 from corpus_forensics.knowledge_base.loaders import get_kb_loader, list_available_sources
 from corpus_forensics.knowledge_base.schemas import AttackEntry
 from corpus_forensics.vectorstore.base import VectorStore
@@ -17,6 +18,7 @@ def ingest_knowledge_base(
     source_path: Path | str | None = None,
     reset: bool = False,
     batch_size: int = 64,
+    apply_labeling: bool = True,
 ) -> dict[str, Any]:
     """Ingest attack knowledge base entries into the vector store.
 
@@ -29,6 +31,7 @@ def ingest_knowledge_base(
         source_path: Path to source data. If None, defaults to configured paths.
         reset: If True, resets vector store before ingestion.
         batch_size: Embedding batch size.
+        apply_labeling: Label entries by rules and drop out-of-scope ones before embedding.
 
     Returns:
         Summary dictionary with counts of ingested entries.
@@ -41,6 +44,7 @@ def ingest_knowledge_base(
     sources_to_run = list_available_sources() if source.lower() == "all" else [source.lower()]
 
     ingested_counts: dict[str, int] = {}
+    discarded_counts: dict[str, int] = {}
     total_ingested = 0
 
     for src_name in sources_to_run:
@@ -56,6 +60,11 @@ def ingest_knowledge_base(
                 path_to_use = settings.kb_raw_dir / src_name
 
         entries: list[AttackEntry] = list(loader.load(path_to_use))
+        if apply_labeling:
+            entries, discarded = label_entries(entries)
+            for (_, reason), n in discarded.items():
+                key = f"{src_name}: {reason}"
+                discarded_counts[key] = discarded_counts.get(key, 0) + n
         if not entries:
             ingested_counts[src_name] = 0
             continue
@@ -88,5 +97,6 @@ def ingest_knowledge_base(
         "status": "success",
         "total_ingested": total_ingested,
         "by_source": ingested_counts,
+        "discarded": discarded_counts,
         "store_count": vector_store.count(),
     }

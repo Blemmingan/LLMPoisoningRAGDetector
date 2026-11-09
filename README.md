@@ -123,8 +123,23 @@ uv run corpus-forensics kb ingest --source all --reset
 | [MITRE ATLAS](https://github.com/mitre-atlas/atlas-data) | Prompt-injection techniques and real case-study steps, with official mitigations | Apache-2.0 | 55 |
 | [OWASP LLM01/LLM07 2025](https://genai.owasp.org/llmrisk/llm01-prompt-injection/) | Example attack scenarios and prevention strategies | CC BY-SA 4.0 | 11 |
 
-Entries are not labeled with an attack type yet (`attack_type: otro`, metadata
-`etiquetado: pendiente`); each keeps its original category in the metadata.
+Entries are labeled by rules during `kb ingest` (`knowledge_base/labeling.py`, no LLM):
+
+- **BIPIA** by category; its 25 task-irrelevant questions ("What is the capital of Brazil?")
+  are dropped: they are attacks only by context.
+- **deepset** and **HackAPrompt** by multilingual patterns (EN/DE/ES/FR/RU...) for
+  instruction override, role-play, prompt leaking, exfiltration and planted triggers.
+  deepset rows asking for misinformation or planting false "context" are dropped (factual
+  poisoning is out of scope), as are rows with no instruction aimed at the model.
+- **MITRE ATLAS** by technique ID and **OWASP** by scenario (`etiquetado: fuente`).
+- Concealment is detected from the text: invisible Unicode, base64, HTML comments,
+  non-Latin scripts, homoglyphs and character separation (the last two map to `otro`).
+- Entries without objective or mitigation get a per-type profile citing OWASP / ATLAS.
+
+Each entry records `etiquetado` (`reglas` | `fuente`), the `regla` that fired and its
+`referencia`. A manual check of 80 random deepset/HackAPrompt entries found the attack type
+right in ~95% and the concealment technique in ~90%; misses are creative obfuscations
+(reversed text, "P+W+N+E+D") and conditional payloads, left for a later LLM labeling pass.
 
 ### 1b-bis. Embedders and Paid Calls
 

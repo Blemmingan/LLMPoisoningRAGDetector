@@ -243,6 +243,14 @@ def kb_ingest(
         table.add_row(src, str(count))
     console.print(table)
 
+    if result.get("discarded"):
+        disc_table = Table(title="Discarded as out of scope (rule-based labeling)")
+        disc_table.add_column("Source: reason", style="yellow")
+        disc_table.add_column("Entries", justify="right")
+        for reason, count in sorted(result["discarded"].items()):
+            disc_table.add_row(reason, str(count))
+        console.print(disc_table)
+
 
 @kb_app.command(name="stats")
 def kb_stats() -> None:
@@ -275,6 +283,15 @@ def kb_stats() -> None:
     for at, cnt in stats.get("by_attack_type", {}).items():
         type_table.add_row(at, str(cnt))
     console.print(type_table)
+    print()
+
+    conceal_table = Table(title="Entries by Concealment Technique")
+    conceal_table.add_column("Technique", style="green")
+    conceal_table.add_column("Count", justify="right")
+    for tech, cnt in stats.get("by_concealment", {}).items():
+        conceal_table.add_row(tech, str(cnt))
+    console.print(conceal_table)
+    rprint(f"[dim]Label status: {stats.get('by_label_status', {})}[/dim]")
 
 
 # -----------------------------------------------------------------------------

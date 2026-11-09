@@ -159,10 +159,16 @@ class ChromaVectorStore(VectorStore):
         )
 
     def get_stats(self) -> dict[str, Any]:
-        """Aggregate counts by source and attack type."""
+        """Aggregate counts by source, attack type, concealment technique and label status."""
         total = self.count()
         if total == 0:
-            return {"total_entries": 0, "by_source": {}, "by_attack_type": {}}
+            return {
+                "total_entries": 0,
+                "by_source": {},
+                "by_attack_type": {},
+                "by_concealment": {},
+                "by_label_status": {},
+            }
 
         # Fetch all metadata records to compute breakdown
         all_data = self._collection.get(include=["metadatas"])
@@ -170,17 +176,25 @@ class ChromaVectorStore(VectorStore):
 
         by_source: dict[str, int] = {}
         by_type: dict[str, int] = {}
+        by_concealment: dict[str, int] = {}
+        by_status: dict[str, int] = {}
 
         for m in metadatas:
             if not m:
                 continue
-            src = str(m.get("source", "unknown"))
-            at = str(m.get("attack_type", "otro"))
-            by_source[src] = by_source.get(src, 0) + 1
-            by_type[at] = by_type.get(at, 0) + 1
+            for counter, key, default in (
+                (by_source, "source", "unknown"),
+                (by_type, "attack_type", "otro"),
+                (by_concealment, "concealment_technique", "ninguna"),
+                (by_status, "etiquetado", "desconocido"),
+            ):
+                value = str(m.get(key, default))
+                counter[value] = counter.get(value, 0) + 1
 
         return {
             "total_entries": total,
             "by_source": by_source,
-            "by_attack_type": by_type,
+            "by_attack_type": dict(sorted(by_type.items(), key=lambda kv: -kv[1])),
+            "by_concealment": dict(sorted(by_concealment.items(), key=lambda kv: -kv[1])),
+            "by_label_status": by_status,
         }
