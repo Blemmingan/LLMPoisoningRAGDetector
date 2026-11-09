@@ -91,6 +91,10 @@ class LiteratureStore:
             )
         return passages
 
+    def existing_ids(self) -> set[str]:
+        """IDs already stored (used to resume an interrupted ingestion)."""
+        return set(self._collection.get(include=[])["ids"])
+
     def count(self) -> int:
         return int(self._collection.count())
 

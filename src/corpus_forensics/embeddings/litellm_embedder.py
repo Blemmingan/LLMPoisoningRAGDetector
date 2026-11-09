@@ -5,15 +5,15 @@ re-running an evaluation never pays twice for the same embedding. Each paid batc
 recorded in the usage ledger and checked against the spending cap.
 """
 
-from openai import OpenAI, OpenAIError
+from openai import OpenAI
 
 from corpus_forensics.config import Settings, get_settings
 from corpus_forensics.embeddings.base import Embedder
-from corpus_forensics.llm.base import LLMError
 from corpus_forensics.llm.cache import ResponseCache
 from corpus_forensics.llm.litellm_client import (
     build_openai_client,
     build_usage_tracker,
+    call_with_retries,
     cost_from_headers,
 )
 from corpus_forensics.llm.usage import UsageRecord, UsageTracker, estimate_cost
@@ -81,13 +81,14 @@ class LiteLLMEmbedder(Embedder):
             batch_idx = missing[start : start + self.batch_size]
             batch = [texts[i] or " " for i in batch_idx]
             self.tracker.check_budget()
-            try:
-                raw = self._client.embeddings.with_raw_response.create(
+            raw = call_with_retries(
+                lambda batch=batch: self._client.embeddings.with_raw_response.create(  # type: ignore[misc]
                     model=self.model, input=batch
-                )
-                response = raw.parse()
-            except OpenAIError as exc:
-                raise LLMError(f"Embedding call failed: {exc}") from exc
+                ),
+                max_retries=self.settings.llm_max_retries,
+                backoff_s=self.settings.llm_retry_backoff_s,
+            )
+            response = raw.parse()
             tokens = response.usage.prompt_tokens if response.usage else 0
             proxy_cost = cost_from_headers(raw.headers)
             self.tracker.record(

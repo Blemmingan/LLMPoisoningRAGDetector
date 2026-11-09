@@ -68,6 +68,16 @@ class Settings(BaseSettings):
     )
     embedding_dimension: int = Field(default=128, description="Dimensionality of embeddings")
 
+    # Local embeddings (CF_EMBEDDER_PROVIDER=local)
+    local_embedding_model: str = Field(
+        default="intfloat/multilingual-e5-small",
+        description="sentence-transformers model name or local path",
+    )
+    local_embedding_query_prefix: str = Field(default="query: ", description="E5 query prefix")
+    local_embedding_passage_prefix: str = Field(
+        default="passage: ", description="E5 passage prefix"
+    )
+
     # LiteLLM proxy (OpenAI-compatible) credentials and model names
     llm_base_url: str | None = Field(default=None, description="Base URL of the LiteLLM proxy")
     llm_api_key: SecretStr | None = Field(default=None, description="API key for the LiteLLM proxy")
@@ -92,6 +102,10 @@ class Settings(BaseSettings):
     llm_temperature: float = Field(default=0.0, description="Sampling temperature")
     llm_max_output_tokens: int = Field(default=800, description="Max output tokens per call")
     llm_timeout_s: float = Field(default=60.0, description="Request timeout in seconds")
+    llm_max_retries: int = Field(
+        default=2, description="Retries for transient errors (never for lack of credit)"
+    )
+    llm_retry_backoff_s: float = Field(default=2.0, description="Initial retry backoff")
 
     # Spending control (the team budget on the proxy is USD 10 in total)
     llm_cache_enabled: bool = Field(

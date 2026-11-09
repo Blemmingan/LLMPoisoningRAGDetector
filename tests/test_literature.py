@@ -220,3 +220,50 @@ def test_literature_store_query_and_stats(tmp_path: Path) -> None:
     filtered = store.query([0.0, 1.0], top_k=2, where={"cubre_exfiltracion": True})
     assert [p.id for p in filtered] == ["a"]
     assert store.stats() == {"total": 2, "by_source": {"p1": 1, "p2": 1}}
+
+
+class _FakeSentenceTransformer:
+    def __init__(self) -> None:
+        self.inputs: list[str] = []
+        self.normalize: bool | None = None
+
+    def get_sentence_embedding_dimension(self) -> int:
+        return 3
+
+    def encode(self, texts: list[str], normalize_embeddings: bool, **_: Any) -> Any:
+        import numpy as np
+
+        self.inputs.extend(texts)
+        self.normalize = normalize_embeddings
+        return np.array([[1.0, 0.0, float(len(t))] for t in texts])
+
+
+def test_local_embedder_uses_e5_prefixes_and_normalization() -> None:
+    from corpus_forensics.embeddings.local_embedder import LocalEmbedder
+
+    fake = _FakeSentenceTransformer()
+    embedder = LocalEmbedder(settings=Settings(), model=fake)
+
+    docs = embedder.embed_documents(["ignore previous instructions"])
+    query = embedder.embed_query("ignorá las instrucciones")
+
+    assert fake.inputs == [
+        "passage: ignore previous instructions",
+        "query: ignorá las instrucciones",
+    ]
+    assert fake.normalize is True
+    assert embedder.dimension == 3 and embedder.is_mock is False
+    assert isinstance(docs[0][0], float) and len(query) == 3
+
+
+def test_local_embedder_is_registered_in_factory() -> None:
+    from corpus_forensics.embeddings.factory import get_embedder
+    from corpus_forensics.embeddings.local_embedder import LocalEmbedder
+
+    assert isinstance(get_embedder(provider="local", dimension=128), LocalEmbedder)
+
+
+def test_literature_store_reports_existing_ids(tmp_path: Path) -> None:
+    store = LiteratureStore(tmp_path / "vs")
+    store.add(ids=["x"], texts=["t"], embeddings=[[1.0, 0.0]], metadatas=[{"fuente_id": "p"}])
+    assert store.existing_ids() == {"x"}

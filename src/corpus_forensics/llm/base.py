@@ -13,7 +13,15 @@ class LLMError(Exception):
 
 
 class BudgetExceededError(LLMError):
-    """Raised before a paid call when the configured spending cap has been reached."""
+    """Raised before a paid call when the configured spending cap has been reached.
+
+    Any subclass stops the whole run: the analyst re-raises it instead of skipping a chunk.
+    """
+
+
+class ProviderQuotaError(BudgetExceededError):
+    """Raised when the provider behind the proxy has no credit left (HTTP 429
+    `insufficient_quota`). Retrying cannot help, so the run stops at the first one."""
 
 
 class LLMClient(ABC):

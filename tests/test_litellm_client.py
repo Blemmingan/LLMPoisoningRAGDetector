@@ -82,6 +82,7 @@ def llm_settings(tmp_path: Path) -> Settings:
         cache_dir=tmp_path / "cache",
         usage_ledger_path=tmp_path / "usage" / "ledger.jsonl",
         budget_limit_usd=1.0,
+        llm_retry_backoff_s=0.0,
     )
 
 
@@ -210,3 +211,58 @@ def test_llm_error_is_raised_on_refusal(llm_settings: Settings) -> None:
     fake.chat.completions.with_raw_response.parse = refusing_parse
     with pytest.raises(LLMError, match="refused"):
         client.generate_structured("prompt", AnalisisChunkLLM)
+
+
+def _status_error(status: int, message: str) -> Exception:
+    import httpx
+    from openai import APIStatusError, RateLimitError
+
+    response = httpx.Response(status, request=httpx.Request("POST", "https://proxy.invalid"))
+    cls = RateLimitError if status == 429 else APIStatusError
+    return cls(message, response=response, body={"error": {"message": message}})
+
+
+QUOTA_MSG = (
+    "litellm.RateLimitError: OpenAIException - Error code: 429 - {'error': {'message': "
+    "'You have no credits remaining.', 'type': 'insufficient_quota', 'code': "
+    "'credit_balance_exhausted'}}"
+)
+
+
+def test_lack_of_credit_stops_at_first_attempt(llm_settings: Settings) -> None:
+    from corpus_forensics.llm.base import ProviderQuotaError
+
+    fake = FakeOpenAI(error=_status_error(429, QUOTA_MSG))
+    client = _client(llm_settings, fake)
+    with pytest.raises(ProviderQuotaError):
+        client.generate_structured("prompt", AnalisisChunkLLM)
+    assert fake.calls == 1  # no retries against an empty account
+
+
+def test_lack_of_credit_stops_the_analyst_instead_of_skipping_chunks(
+    llm_settings: Settings,
+) -> None:
+    from corpus_forensics.llm.base import ProviderQuotaError
+
+    analyst = ChunkAnalyst(
+        _client(llm_settings, FakeOpenAI(error=_status_error(429, QUOTA_MSG))), PromptBuilder()
+    )
+    with pytest.raises(ProviderQuotaError):
+        analyst.analyze_chunk(_chunk(), [])
+
+
+def test_transient_errors_are_retried_then_reported(llm_settings: Settings) -> None:
+    fake = FakeOpenAI(error=_status_error(503, "service unavailable"))
+    client = _client(llm_settings, fake)
+    with pytest.raises(LLMError):
+        client.generate_structured("prompt", AnalisisChunkLLM)
+    assert fake.calls == 3  # first attempt + 2 retries
+
+
+def test_plain_rate_limit_is_retried_but_not_treated_as_quota() -> None:
+    from corpus_forensics.llm.litellm_client import is_quota_error, is_transient_error
+
+    rate_limit = _status_error(429, "Rate limit reached for requests")
+    assert not is_quota_error(rate_limit) and is_transient_error(rate_limit)
+    quota = _status_error(429, QUOTA_MSG)
+    assert is_quota_error(quota) and not is_transient_error(quota)

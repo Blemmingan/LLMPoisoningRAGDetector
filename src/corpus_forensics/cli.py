@@ -1,11 +1,14 @@
 """Typer Command-Line Interface for Corpus Forensic Analyst."""
 
+import functools
+from collections.abc import Callable
 from pathlib import Path
 from typing import Annotated, Any
 
 import typer
 from rich import print as rprint
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
 
 from corpus_forensics.analysis.pipeline import ForensicPipeline
@@ -14,6 +17,7 @@ from corpus_forensics.embeddings.factory import get_embedder
 from corpus_forensics.evaluation.harness import EvaluationHarness
 from corpus_forensics.knowledge_base.download import download_source, list_downloadable_sources
 from corpus_forensics.knowledge_base.ingest import ingest_knowledge_base
+from corpus_forensics.llm.base import BudgetExceededError
 from corpus_forensics.llm.litellm_client import build_usage_tracker
 from corpus_forensics.reporting.json_writer import write_json_report
 from corpus_forensics.reporting.markdown_renderer import write_markdown_report
@@ -31,6 +35,20 @@ app.add_typer(kb_app, name="kb")
 app.add_typer(eval_app, name="eval")
 
 console = Console()
+
+
+def stop_on_budget(fn: Callable[..., Any]) -> Callable[..., Any]:
+    """Turn spending-cap / no-credit errors into a clear message and a non-zero exit."""
+
+    @functools.wraps(fn)
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        try:
+            return fn(*args, **kwargs)
+        except BudgetExceededError as exc:
+            rprint(f"[bold red]Stopped:[/bold red] {exc}")
+            raise typer.Exit(code=2) from exc
+
+    return wrapper
 
 
 # -----------------------------------------------------------------------------
@@ -123,6 +141,10 @@ def analyze(
                 str(len(report.hallazgos)),
                 ", ".join(report_links),
             )
+        except BudgetExceededError as e:
+            console.print(results_table)
+            rprint(f"[bold red]Stopped:[/bold red] {e}")
+            raise typer.Exit(code=2) from e
         except Exception as e:
             results_table.add_row(file_path.name, "[red]ERROR[/red]", "-", str(e))
 
@@ -172,6 +194,7 @@ def kb_download(
 
 
 @kb_app.command(name="ingest")
+@stop_on_budget
 def kb_ingest(
     source: Annotated[
         str,
@@ -260,6 +283,7 @@ def kb_stats() -> None:
 
 
 @eval_app.command(name="run")
+@stop_on_budget
 def eval_run(
     dataset: Annotated[
         Path,
@@ -447,10 +471,19 @@ def lit_build() -> None:
 
 
 @lit_app.command(name="ingest")
+@stop_on_budget
 def lit_ingest(
-    reset: Annotated[bool, typer.Option("--reset", "-r", help="Recreate the collection.")] = False,
+    reset: Annotated[
+        bool,
+        typer.Option(
+            "--reset", "-r", help="Recreate the collection (needed after changing embedder)."
+        ),
+    ] = False,
 ) -> None:
-    """Embed the built chunks and load them into the `literatura` collection."""
+    """Embed the built chunks and load them into the `literatura` collection.
+
+    Without --reset it resumes, embedding only passages not loaded yet.
+    """
     from corpus_forensics.knowledge_base.literature import read_chunks
     from corpus_forensics.vectorstore.literature_store import LiteratureStore
 
@@ -462,6 +495,11 @@ def lit_ingest(
     store = LiteratureStore(settings.vectorstore_dir)
     if reset:
         store.reset()
+    else:  # resume: skip passages already loaded
+        done = store.existing_ids()
+        chunks = [c for c in chunks if c.id not in done]
+        if done:
+            rprint(f"[dim]Resuming: {len(done)} passages already loaded.[/dim]")
     batch = 100
     for i in range(0, len(chunks), batch):
         part = chunks[i : i + batch]
@@ -494,6 +532,7 @@ def lit_stats() -> None:
 
 
 @lit_app.command(name="search")
+@stop_on_budget
 def lit_search(
     query: Annotated[str, typer.Argument(help="Text to search for.")],
     top_k: Annotated[int, typer.Option("--top-k", "-k")] = 3,
@@ -509,8 +548,13 @@ def lit_search(
         embedder.embed_query(query), top_k=top_k
     )
     for p in passages:
-        rprint(f"[bold]{p.similarity_score:.3f}[/bold] [cyan]{p.titulo}[/cyan] | {p.seccion}")
-        rprint(f"  {p.texto[:300]}...\n")
+        # escape(): passages contain brackets (e.g. markdown images) that Rich would
+        # otherwise swallow as style markup
+        rprint(
+            f"[bold]{p.similarity_score:.3f}[/bold] [cyan]{escape(p.titulo)}[/cyan] | "
+            f"{escape(p.seccion)}"
+        )
+        rprint(f"  {escape(p.texto[:300])}...\n")
 
 
 if __name__ == "__main__":

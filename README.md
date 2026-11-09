@@ -126,6 +126,22 @@ uv run corpus-forensics kb ingest --source all --reset
 Entries are not labeled with an attack type yet (`attack_type: otro`, metadata
 `etiquetado: pendiente`); each keeps its original category in the metadata.
 
+### 1b-bis. Embedders and Paid Calls
+
+| `CF_EMBEDDER_PROVIDER` | What it is | Cost |
+|---|---|---|
+| `mock` | Hash vectors, no meaning (tests only) | Free |
+| `local` (default) | `intfloat/multilingual-e5-small` via sentence-transformers, 384 dims, E5 `query:` / `passage:` prefixes | Free, ~470 MB download once |
+| `litellm` | `text-embedding-3-small` through the course proxy | Paid, cached |
+
+Changing the embedder changes the vector dimension: run `kb ingest --reset` and
+`lit ingest --reset` afterwards. On a CPU, loading both collections takes about 3 minutes;
+`lit ingest` without `--reset` resumes where it stopped.
+
+Calls to the proxy stop the whole run at the first "no credit" answer (HTTP 429
+`insufficient_quota`) instead of retrying; only transient errors (network, 5xx, real rate
+limits) are retried, twice.
+
 ### 1c. Literature Collection (papers and reports)
 
 A second Chroma collection, `literatura`, holds passages from 27 high-priority papers and
