@@ -75,9 +75,19 @@ class Settings(BaseSettings):
     embedding_model: str | None = Field(
         default=None, description="Embedding model name exposed by the proxy"
     )
+    # Literature collection (papers and technical reports)
+    lit_chunk_tokens: int = Field(default=350, description="Target tokens per literature chunk")
+    lit_chunk_overlap: int = Field(default=50, description="Overlap tokens between chunks")
+    lit_priorities: str = Field(
+        default="alta", description="Comma-separated priorities of sources to use"
+    )
+
     report_language: str = Field(
         default="es",
         description="Language for free-text report fields ('es', 'en', 'pt' or a language name)",
+    )
+    hf_token: SecretStr | None = Field(
+        default=None, description="Hugging Face read token (gated HackAPrompt dataset)"
     )
     llm_temperature: float = Field(default=0.0, description="Sampling temperature")
     llm_max_output_tokens: int = Field(default=800, description="Max output tokens per call")
@@ -90,6 +100,21 @@ class Settings(BaseSettings):
     budget_limit_usd: float = Field(
         default=8.0, description="Local spending cap; paid calls stop once it is reached"
     )
+
+    @property
+    def kb_processed_dir(self) -> Path:
+        """Directory for processed knowledge-base artifacts (markdown, chunks)."""
+        return self.kb_dir / "processed"
+
+    @property
+    def literature_sources_path(self) -> Path:
+        """Versioned list of literature sources."""
+        return self.kb_dir / "literature_sources.yaml"
+
+    @property
+    def kb_raw_dir(self) -> Path:
+        """Directory where `kb download` stores the raw files of each source."""
+        return self.kb_dir / "raw"
 
     @property
     def llm_is_mock(self) -> bool:

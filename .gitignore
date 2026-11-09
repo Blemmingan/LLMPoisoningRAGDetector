@@ -49,6 +49,11 @@ data/vectorstore/*
 # Generated forensic reports
 reports/
 
+# Raw knowledge-base downloads and processed literature (rebuild with
+# `corpus-forensics kb download` / `corpus-forensics lit download && lit build`)
+data/knowledge_base/raw/
+data/knowledge_base/processed/
+
 # Local LLM response cache and usage ledger
 data/cache/
 data/usage/

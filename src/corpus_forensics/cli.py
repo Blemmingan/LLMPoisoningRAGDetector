@@ -1,7 +1,7 @@
 """Typer Command-Line Interface for Corpus Forensic Analyst."""
 
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import typer
 from rich import print as rprint
@@ -12,6 +12,7 @@ from corpus_forensics.analysis.pipeline import ForensicPipeline
 from corpus_forensics.config import get_settings
 from corpus_forensics.embeddings.factory import get_embedder
 from corpus_forensics.evaluation.harness import EvaluationHarness
+from corpus_forensics.knowledge_base.download import download_source, list_downloadable_sources
 from corpus_forensics.knowledge_base.ingest import ingest_knowledge_base
 from corpus_forensics.llm.litellm_client import build_usage_tracker
 from corpus_forensics.reporting.json_writer import write_json_report
@@ -131,6 +132,43 @@ def analyze(
 # -----------------------------------------------------------------------------
 # kb commands
 # -----------------------------------------------------------------------------
+
+
+@kb_app.command(name="download")
+def kb_download(
+    source: Annotated[
+        str,
+        typer.Option("--source", "-s", help="Source name or 'all'."),
+    ] = "all",
+    force: Annotated[
+        bool,
+        typer.Option("--force", "-f", help="Download again even if files already exist."),
+    ] = False,
+) -> None:
+    """Download the raw files of the knowledge-base sources (no scraping, no LLM calls)."""
+    settings = get_settings()
+    sources = list_downloadable_sources() if source.lower() == "all" else [source.lower()]
+    hf_token = settings.hf_token.get_secret_value() if settings.hf_token else None
+
+    table = Table(title="Knowledge base download")
+    table.add_column("Source", style="cyan")
+    table.add_column("File")
+    table.add_column("Status")
+    table.add_column("Size", justify="right")
+    for name in sources:
+        try:
+            result = download_source(name, settings.kb_raw_dir, hf_token=hf_token, force=force)
+        except Exception as exc:  # report and continue with the other sources
+            table.add_row(name, "-", f"[red]ERROR[/red] {exc}", "-")
+            continue
+        for f in result["files"]:
+            size = "-"
+            if "bytes" in f:
+                kb = f["bytes"] / 1000
+                size = f"{kb / 1000:.1f} MB" if kb >= 1000 else f"{kb:.0f} kB"
+            table.add_row(name, f["file"], f["status"], size)
+    console.print(table)
+    rprint(f"[dim]Raw files in {settings.kb_raw_dir}[/dim]")
 
 
 @kb_app.command(name="ingest")
@@ -322,6 +360,157 @@ def usage(
         )
     except (httpx.HTTPError, ValueError) as exc:
         rprint(f"[yellow]Could not read team spend from proxy: {exc}[/yellow]")
+
+
+# -----------------------------------------------------------------------------
+# lit commands (literature collection: papers and technical reports)
+# -----------------------------------------------------------------------------
+
+lit_app = typer.Typer(help="Literature collection: papers and reports about attack types.")
+app.add_typer(lit_app, name="lit")
+
+
+def _lit_sources() -> list[Any]:
+    from corpus_forensics.knowledge_base.literature import load_sources
+
+    settings = get_settings()
+    priorities = [p.strip() for p in settings.lit_priorities.split(",") if p.strip()]
+    return load_sources(settings.literature_sources_path, priorities=priorities)
+
+
+@lit_app.command(name="download")
+def lit_download(
+    force: Annotated[bool, typer.Option("--force", "-f", help="Download again.")] = False,
+) -> None:
+    """Download the literature sources (PDF/HTML) listed in literature_sources.yaml."""
+    from corpus_forensics.knowledge_base.literature import download_literature
+
+    settings = get_settings()
+    sources = _lit_sources()
+    rprint(f"[bold cyan]Downloading {len(sources)} literature sources[/bold cyan]")
+    results = download_literature(sources, settings.kb_raw_dir / "literatura", force=force)
+    table = Table(title="Literature download")
+    table.add_column("Source", style="cyan")
+    table.add_column("Status")
+    table.add_column("Size", justify="right")
+    for r in results:
+        size = f"{r['bytes'] / 1000:.0f} kB" if "bytes" in r else "-"
+        status = r["status"] if r["status"] != "error" else f"[red]error[/red] {r['error']}"
+        table.add_row(r["id"], status, size)
+    console.print(table)
+
+
+@lit_app.command(name="build")
+def lit_build() -> None:
+    """Convert downloaded sources to markdown (Docling for PDFs) and split into chunks."""
+    from corpus_forensics.knowledge_base.literature import (
+        chunk_source,
+        source_to_markdown,
+        write_chunks,
+    )
+
+    settings = get_settings()
+    raw_dir = settings.kb_raw_dir / "literatura"
+    md_dir = settings.kb_processed_dir / "markdown"
+    all_chunks = []
+    table = Table(title="Literature chunks")
+    table.add_column("Source", style="cyan")
+    table.add_column("Chunks", justify="right")
+    table.add_column("Tokens", justify="right")
+    table.add_column("With payload", justify="right")
+    for source in _lit_sources():
+        if not (raw_dir / source.filename).exists():
+            table.add_row(source.id, "[yellow]not downloaded[/yellow]", "-", "-")
+            continue
+        try:
+            markdown = source_to_markdown(source, raw_dir, md_dir)
+        except Exception as exc:  # keep going with the other sources
+            table.add_row(source.id, f"[red]error[/red] {exc}", "-", "-")
+            continue
+        chunks = chunk_source(
+            source,
+            markdown,
+            target_tokens=settings.lit_chunk_tokens,
+            overlap_tokens=settings.lit_chunk_overlap,
+        )
+        all_chunks.extend(chunks)
+        table.add_row(
+            source.id,
+            str(len(chunks)),
+            str(sum(c.n_tokens for c in chunks)),
+            str(sum(1 for c in chunks if c.metadata.get("contiene_payload"))),
+        )
+    out = settings.kb_processed_dir / "literatura_chunks.jsonl"
+    n = write_chunks(all_chunks, out)
+    console.print(table)
+    rprint(f"[green]{n} chunks[/green], {sum(c.n_tokens for c in all_chunks)} tokens -> {out}")
+
+
+@lit_app.command(name="ingest")
+def lit_ingest(
+    reset: Annotated[bool, typer.Option("--reset", "-r", help="Recreate the collection.")] = False,
+) -> None:
+    """Embed the built chunks and load them into the `literatura` collection."""
+    from corpus_forensics.knowledge_base.literature import read_chunks
+    from corpus_forensics.vectorstore.literature_store import LiteratureStore
+
+    settings = get_settings()
+    chunks = read_chunks(settings.kb_processed_dir / "literatura_chunks.jsonl")
+    embedder = get_embedder(
+        provider=settings.embedder_provider, dimension=settings.embedding_dimension
+    )
+    store = LiteratureStore(settings.vectorstore_dir)
+    if reset:
+        store.reset()
+    batch = 100
+    for i in range(0, len(chunks), batch):
+        part = chunks[i : i + batch]
+        vectors = embedder.embed_documents([c.embedding_text for c in part])
+        store.add(
+            ids=[c.id for c in part],
+            texts=[c.texto for c in part],
+            embeddings=vectors,
+            metadatas=[c.metadata for c in part],
+        )
+    rprint(
+        f"[green]Loaded {len(chunks)} passages[/green] into 'literatura' "
+        f"(embedder: {settings.embedder_provider}, mock: {embedder.is_mock}). "
+        f"Total in collection: {store.count()}"
+    )
+
+
+@lit_app.command(name="stats")
+def lit_stats() -> None:
+    """Show passage counts per source in the `literatura` collection."""
+    from corpus_forensics.vectorstore.literature_store import LiteratureStore
+
+    stats = LiteratureStore(get_settings().vectorstore_dir).stats()
+    table = Table(title=f"Literatura: {stats['total']} passages")
+    table.add_column("Source", style="cyan")
+    table.add_column("Passages", justify="right")
+    for src, n in stats["by_source"].items():
+        table.add_row(src, str(n))
+    console.print(table)
+
+
+@lit_app.command(name="search")
+def lit_search(
+    query: Annotated[str, typer.Argument(help="Text to search for.")],
+    top_k: Annotated[int, typer.Option("--top-k", "-k")] = 3,
+) -> None:
+    """Search the literature collection (costs one embedding call)."""
+    from corpus_forensics.vectorstore.literature_store import LiteratureStore
+
+    settings = get_settings()
+    embedder = get_embedder(
+        provider=settings.embedder_provider, dimension=settings.embedding_dimension
+    )
+    passages = LiteratureStore(settings.vectorstore_dir).query(
+        embedder.embed_query(query), top_k=top_k
+    )
+    for p in passages:
+        rprint(f"[bold]{p.similarity_score:.3f}[/bold] [cyan]{p.titulo}[/cyan] | {p.seccion}")
+        rprint(f"  {p.texto[:300]}...\n")
 
 
 if __name__ == "__main__":

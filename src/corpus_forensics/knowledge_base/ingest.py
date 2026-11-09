@@ -53,7 +53,7 @@ def ingest_knowledge_base(
                 # Default custom path to samples directory
                 path_to_use = settings.samples_dir
             else:
-                path_to_use = settings.kb_dir / src_name
+                path_to_use = settings.kb_raw_dir / src_name
 
         entries: list[AttackEntry] = list(loader.load(path_to_use))
         if not entries:

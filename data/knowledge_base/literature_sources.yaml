@@ -1,0 +1,411 @@
+# Literature sources for the `literatura` collection of the knowledge base.
+#
+# Only this list is versioned. The documents themselves are downloaded locally with
+# `corpus-forensics lit download` and are NOT committed: the repository is public and most
+# of these works can be read but not redistributed (see `licencia` / `clase_licencia`).
+#
+# clase_licencia: R = redistributable (CC BY / CC BY-SA / public domain)
+#                 R-NC = CC BY-NC (non-commercial)
+#                 D = download and read locally only (arXiv non-exclusive, blogs, no license shown)
+#                 I = internal use only (Unicode technical reports)
+# cubre: inyeccion, indirecta, envenenamiento, trigger, jailbreak, exfiltracion,
+#        prompt_leaking, ocultamiento, mitigacion
+# Curated on 2026-10-31 from the research report "Literatura sobre ataques a LLMs".
+
+fuentes:
+  # ---------------------------------------------------------------- taxonomías
+  - id: nist-ai-100-2-e2025
+    titulo: "Adversarial Machine Learning: A Taxonomy and Terminology of Attacks and Mitigations (NIST AI 100-2 E2025)"
+    autores: "Vassilev, Oprea, Fordyce, Anderson, Davies, Hamin"
+    anio: 2025
+    venue: "NIST"
+    url: "https://nvlpubs.nist.gov/nistpubs/ai/NIST.AI.100-2e2025.pdf"
+    formato: pdf
+    licencia: "US Government work (public domain, inferred)"
+    clase_licencia: R
+    bloque: taxonomias
+    prioridad: alta
+    cubre: [inyeccion, indirecta, jailbreak, prompt_leaking, exfiltracion, mitigacion]
+
+  - id: owasp-llm01-2025
+    titulo: "OWASP Top 10 for LLM Applications 2025: LLM01 Prompt Injection"
+    autores: "OWASP GenAI Security Project"
+    anio: 2025
+    venue: "OWASP"
+    url: "https://genai.owasp.org/llmrisk/llm01-prompt-injection/"
+    formato: html
+    licencia: "CC BY-SA 4.0"
+    clase_licencia: R
+    bloque: taxonomias
+    prioridad: alta
+    cubre: [inyeccion, indirecta, ocultamiento, exfiltracion, mitigacion]
+
+  - id: owasp-llm07-2025
+    titulo: "OWASP Top 10 for LLM Applications 2025: LLM07 System Prompt Leakage"
+    autores: "OWASP GenAI Security Project"
+    anio: 2025
+    venue: "OWASP"
+    url: "https://genai.owasp.org/llmrisk/llm072025-system-prompt-leakage/"
+    formato: html
+    licencia: "CC BY-SA 4.0"
+    clase_licencia: R
+    bloque: taxonomias
+    prioridad: alta
+    cubre: [prompt_leaking, mitigacion]
+
+  - id: hackaprompt-2023
+    titulo: "Ignore This Title and HackAPrompt: Exposing Systemic Vulnerabilities of LLMs through a Global Scale Prompt Hacking Competition"
+    autores: "Schulhoff, Pinto, Khan, et al."
+    anio: 2023
+    venue: "EMNLP 2023 (no verificado)"
+    url: "https://arxiv.org/pdf/2311.16119"
+    formato: pdf
+    licencia: "CC BY 4.0"
+    clase_licencia: R
+    bloque: taxonomias
+    prioridad: alta
+    cubre: [inyeccion, prompt_leaking, ocultamiento, jailbreak]
+
+  # ---------------------------------------------------------------- inyección
+  - id: perez-ribeiro-2022
+    titulo: "Ignore Previous Prompt: Attack Techniques For Language Models"
+    autores: "Perez, Ribeiro"
+    anio: 2022
+    venue: "ML Safety Workshop, NeurIPS 2022"
+    url: "https://arxiv.org/pdf/2211.09527"
+    formato: pdf
+    licencia: "CC BY-NC-SA 4.0"
+    clase_licencia: R-NC
+    bloque: inyeccion
+    prioridad: alta
+    cubre: [inyeccion, prompt_leaking]
+
+  - id: greshake-2023
+    titulo: "Not what you've signed up for: Compromising Real-World LLM-Integrated Applications with Indirect Prompt Injection"
+    autores: "Greshake, Abdelnabi, Mishra, Endres, Holz, Fritz"
+    anio: 2023
+    venue: "AISec '23 (ACM CCS)"
+    url: "https://arxiv.org/pdf/2302.12173"
+    formato: pdf
+    licencia: "arXiv non-exclusive"
+    clase_licencia: D
+    bloque: inyeccion
+    prioridad: alta
+    cubre: [indirecta, exfiltracion, ocultamiento, trigger, jailbreak]
+
+  - id: liu-usenix-2024
+    titulo: "Formalizing and Benchmarking Prompt Injection Attacks and Defenses"
+    autores: "Liu, Jia, Geng, Jia, Gong"
+    anio: 2024
+    venue: "USENIX Security 2024"
+    url: "https://arxiv.org/pdf/2310.12815"
+    formato: pdf
+    licencia: "CC BY 4.0"
+    clase_licencia: R
+    bloque: inyeccion
+    prioridad: alta
+    cubre: [inyeccion, indirecta, mitigacion]
+
+  - id: bipia-2023
+    titulo: "Benchmarking and Defending Against Indirect Prompt Injection Attacks on Large Language Models (BIPIA)"
+    autores: "Yi, Xie, Zhu, Kiciman, Sun, Xie, Wu"
+    anio: 2023
+    venue: "KDD 2025"
+    url: "https://arxiv.org/pdf/2312.14197"
+    formato: pdf
+    licencia: "arXiv non-exclusive"
+    clase_licencia: D
+    bloque: inyeccion
+    prioridad: alta
+    cubre: [indirecta, exfiltracion, mitigacion]
+
+  # ---------------------------------------------------------------- envenenamiento y triggers
+  - id: poisonedrag-2025
+    titulo: "PoisonedRAG: Knowledge Corruption Attacks to Retrieval-Augmented Generation of Large Language Models"
+    autores: "Zou, Geng, Wang, Jia"
+    anio: 2025
+    venue: "USENIX Security 2025"
+    url: "https://www.usenix.org/system/files/usenixsecurity25-zou-poisonedrag.pdf"
+    formato: pdf
+    licencia: "USENIX open access (read)"
+    clase_licencia: D
+    bloque: envenenamiento
+    prioridad: alta
+    cubre: [envenenamiento, indirecta, mitigacion]
+
+  - id: phantom-2024
+    titulo: "Phantom: General Backdoor Attacks on Retrieval Augmented Language Generation"
+    autores: "Chaudhari, Severi, Abascal, Suri, Jagielski, Choquette-Choo, Nasr, Nita-Rotaru, Oprea"
+    anio: 2024
+    venue: "Preprint"
+    url: "https://arxiv.org/pdf/2405.20485"
+    formato: pdf
+    licencia: "CC BY 4.0"
+    clase_licencia: R
+    bloque: envenenamiento
+    prioridad: alta
+    cubre: [trigger, envenenamiento, exfiltracion, jailbreak]
+
+  - id: badrag-2024
+    titulo: "BadRAG: Identifying Vulnerabilities in Retrieval Augmented Generation of Large Language Models"
+    autores: "Xue, Zheng, Hu, Liu, Chen, Lou"
+    anio: 2024
+    venue: "Preprint"
+    url: "https://arxiv.org/pdf/2406.00083"
+    formato: pdf
+    licencia: "CC BY-NC-SA 4.0"
+    clase_licencia: R-NC
+    bloque: envenenamiento
+    prioridad: alta
+    cubre: [trigger, envenenamiento]
+
+  - id: agentpoison-2024
+    titulo: "AgentPoison: Red-teaming LLM Agents via Poisoning Memory or Knowledge Bases"
+    autores: "Chen, Xiang, Xiao, Song, Li"
+    anio: 2024
+    venue: "NeurIPS 2024"
+    url: "https://arxiv.org/pdf/2407.12784"
+    formato: pdf
+    licencia: "arXiv non-exclusive"
+    clase_licencia: D
+    bloque: envenenamiento
+    prioridad: alta
+    cubre: [trigger, envenenamiento]
+
+  - id: ragforensics-2025
+    titulo: "Traceback of Poisoning Attacks to Retrieval-Augmented Generation (RAGForensics)"
+    autores: "Zhang, Xin, Fang, Liu, Yi, Li, Liu"
+    anio: 2025
+    venue: "Preprint"
+    url: "https://arxiv.org/pdf/2504.21668"
+    formato: pdf
+    licencia: "arXiv non-exclusive"
+    clase_licencia: D
+    bloque: envenenamiento
+    prioridad: alta
+    cubre: [envenenamiento, mitigacion]
+
+  # ---------------------------------------------------------------- jailbreaks
+  - id: wei-jailbroken-2023
+    titulo: "Jailbroken: How Does LLM Safety Training Fail?"
+    autores: "Wei, Haghtalab, Steinhardt"
+    anio: 2023
+    venue: "NeurIPS 2023"
+    url: "https://arxiv.org/pdf/2307.02483"
+    formato: pdf
+    licencia: "arXiv non-exclusive"
+    clase_licencia: D
+    bloque: jailbreak
+    prioridad: alta
+    cubre: [jailbreak, ocultamiento]
+
+  - id: shen-dan-2024
+    titulo: "\"Do Anything Now\": Characterizing and Evaluating In-The-Wild Jailbreak Prompts on Large Language Models"
+    autores: "Shen, Chen, Backes, Shen, Zhang"
+    anio: 2024
+    venue: "ACM CCS 2024"
+    url: "https://arxiv.org/pdf/2308.03825"
+    formato: pdf
+    licencia: "CC BY 4.0"
+    clase_licencia: R
+    bloque: jailbreak
+    prioridad: alta
+    cubre: [jailbreak, inyeccion, mitigacion]
+
+  - id: liu-jailbreak-study-2023
+    titulo: "Jailbreaking ChatGPT via Prompt Engineering: An Empirical Study"
+    autores: "Liu, Deng, Xu, Li, et al."
+    anio: 2023
+    venue: "Preprint"
+    url: "https://arxiv.org/pdf/2305.13860"
+    formato: pdf
+    licencia: "CC BY 4.0"
+    clase_licencia: R
+    bloque: jailbreak
+    prioridad: alta
+    cubre: [jailbreak]
+
+  - id: many-shot-2024
+    titulo: "Many-shot Jailbreaking"
+    autores: "Anil, Durmus, Sharma, et al. (Anthropic)"
+    anio: 2024
+    venue: "NeurIPS 2024"
+    url: "https://www-cdn.anthropic.com/af5633c94ed2beb282f6a53c595eb437e8e7b630/Many_Shot_Jailbreaking__2024_04_02_0936.pdf"
+    formato: pdf
+    licencia: "No license shown"
+    clase_licencia: D
+    bloque: jailbreak
+    prioridad: alta
+    cubre: [jailbreak, mitigacion]
+
+  # ---------------------------------------------------------------- exfiltración y prompt leaking
+  - id: zhang-prompt-extraction-2024
+    titulo: "Effective Prompt Extraction from Language Models"
+    autores: "Zhang, Carlini, Ippolito"
+    anio: 2024
+    venue: "COLM 2024 (no verificado)"
+    url: "https://arxiv.org/pdf/2307.06865"
+    formato: pdf
+    licencia: "arXiv non-exclusive"
+    clase_licencia: D
+    bloque: exfiltracion
+    prioridad: alta
+    cubre: [prompt_leaking, ocultamiento, mitigacion]
+
+  - id: imprompter-2024
+    titulo: "Imprompter: Tricking LLM Agents into Improper Tool Use"
+    autores: "Fu, Li, Wang, Liu, Gupta, Berg-Kirkpatrick, Fernandes"
+    anio: 2024
+    venue: "Preprint"
+    url: "https://arxiv.org/pdf/2410.14923"
+    formato: pdf
+    licencia: "CC BY-NC-SA 4.0"
+    clase_licencia: R-NC
+    bloque: exfiltracion
+    prioridad: alta
+    cubre: [exfiltracion, ocultamiento]
+
+  - id: echoleak-2025
+    titulo: "EchoLeak: The First Real-World Zero-Click Prompt Injection Exploit in a Production LLM System"
+    autores: "Reddy, Gujral"
+    anio: 2025
+    venue: "Preprint"
+    url: "https://arxiv.org/pdf/2509.10540"
+    formato: pdf
+    licencia: "No license shown"
+    clase_licencia: D
+    bloque: exfiltracion
+    prioridad: alta
+    cubre: [exfiltracion, indirecta, ocultamiento, mitigacion]
+
+  - id: rehberger-bing-exfil-2023
+    titulo: "Bing Chat: Data Exfiltration Exploit Explained"
+    autores: "Rehberger (Embrace The Red)"
+    anio: 2023
+    venue: "Blog"
+    url: "https://embracethered.com/blog/posts/2023/bing-chat-data-exfiltration-poc-and-fix"
+    formato: html
+    licencia: "All rights reserved"
+    clase_licencia: D
+    bloque: exfiltracion
+    prioridad: alta
+    cubre: [exfiltracion, indirecta, mitigacion]
+
+  - id: rehberger-chatgpt-url-safe-2023
+    titulo: "OpenAI Begins Tackling ChatGPT Data Leak Vulnerability"
+    autores: "Rehberger (Embrace The Red)"
+    anio: 2023
+    venue: "Blog"
+    url: "https://embracethered.com/blog/posts/2023/openai-data-exfiltration-first-mitigations-implemented"
+    formato: html
+    licencia: "All rights reserved"
+    clase_licencia: D
+    bloque: exfiltracion
+    prioridad: alta
+    cubre: [exfiltracion, mitigacion]
+
+  - id: rehberger-ascii-smuggler-2024
+    titulo: "ASCII Smuggler Tool: Crafting Invisible Text and Decoding Hidden Codes"
+    autores: "Rehberger (Embrace The Red)"
+    anio: 2024
+    venue: "Blog"
+    url: "https://embracethered.com/blog/posts/2024/hiding-and-finding-text-with-unicode-tags/"
+    formato: html
+    licencia: "All rights reserved"
+    clase_licencia: D
+    bloque: ocultamiento
+    prioridad: alta
+    cubre: [ocultamiento, trigger, mitigacion]
+
+  - id: msrc-indirect-injection-2025
+    titulo: "How Microsoft defends against indirect prompt injection attacks"
+    autores: "Paverd (MSRC)"
+    anio: 2025
+    venue: "MSRC Blog"
+    url: "https://www.microsoft.com/msrc/blog/2025/07/how-microsoft-defends-against-indirect-prompt-injection-attacks"
+    formato: html
+    licencia: "All rights reserved"
+    clase_licencia: D
+    bloque: exfiltracion
+    prioridad: alta
+    cubre: [exfiltracion, indirecta, mitigacion]
+
+  # ---------------------------------------------------------------- ofuscación
+  - id: bad-characters-2022
+    titulo: "Bad Characters: Imperceptible NLP Attacks"
+    autores: "Boucher, Shumailov, Anderson, Papernot"
+    anio: 2022
+    venue: "IEEE S&P 2022"
+    url: "https://arxiv.org/pdf/2106.09898"
+    formato: pdf
+    licencia: "CC BY-NC-ND 4.0"
+    clase_licencia: R-NC
+    bloque: ocultamiento
+    prioridad: alta
+    cubre: [ocultamiento, mitigacion]
+
+  - id: unicode-uts39
+    titulo: "Unicode Technical Standard #39: Unicode Security Mechanisms"
+    autores: "Hadley, Pournader (eds.)"
+    anio: 2026
+    venue: "Unicode Consortium"
+    url: "https://www.unicode.org/reports/tr39/"
+    formato: html
+    licencia: "Unicode terms (internal use)"
+    clase_licencia: I
+    bloque: ocultamiento
+    prioridad: alta
+    cubre: [ocultamiento, mitigacion]
+
+  - id: cipherchat-2024
+    titulo: "GPT-4 Is Too Smart To Be Safe: Stealthy Chat with LLMs via Cipher"
+    autores: "Yuan, Jiao, Wang, Huang, He, Shi, Tu"
+    anio: 2024
+    venue: "ICLR 2024"
+    url: "https://arxiv.org/pdf/2308.06463"
+    formato: pdf
+    licencia: "No license shown"
+    clase_licencia: D
+    bloque: ocultamiento
+    prioridad: alta
+    cubre: [ocultamiento, jailbreak]
+
+  - id: phantomlint-2025
+    titulo: "PhantomLint: Principled Detection of Hidden LLM Prompts in Structured Documents"
+    autores: "Murray"
+    anio: 2025
+    venue: "Preprint"
+    url: "https://arxiv.org/pdf/2508.17884"
+    formato: pdf
+    licencia: "No license shown"
+    clase_licencia: D
+    bloque: ocultamiento
+    prioridad: alta
+    cubre: [ocultamiento, mitigacion]
+
+  # ---------------------------------------------------------------- defensas
+  - id: datasentinel-2025
+    titulo: "DataSentinel: A Game-Theoretic Detection of Prompt Injection Attacks"
+    autores: "Liu, Jia, Jia, Song, Gong"
+    anio: 2025
+    venue: "IEEE S&P 2025"
+    url: "https://arxiv.org/pdf/2504.11358"
+    formato: pdf
+    licencia: "CC BY 4.0"
+    clase_licencia: R
+    bloque: defensas
+    prioridad: alta
+    cubre: [mitigacion, inyeccion, indirecta, ocultamiento]
+
+  - id: spotlighting-2024
+    titulo: "Defending Against Indirect Prompt Injection Attacks With Spotlighting"
+    autores: "Hines, Lopez, Hall, Zarfati, Zunger, Kiciman"
+    anio: 2024
+    venue: "Preprint"
+    url: "https://arxiv.org/pdf/2403.14720"
+    formato: pdf
+    licencia: "CC BY 4.0"
+    clase_licencia: R
+    bloque: defensas
+    prioridad: alta
+    cubre: [mitigacion, indirecta]

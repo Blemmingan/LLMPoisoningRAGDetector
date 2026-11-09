@@ -105,6 +105,55 @@ uv run corpus-forensics kb ingest --source custom --reset
 uv run corpus-forensics kb ingest --source all
 ```
 
+### 1b. Knowledge Base Sources
+
+The knowledge base is built from five public sources. Raw files are **not** committed
+(the repository is public and HackAPrompt is gated); every teammate downloads them with:
+
+```bash
+uv run corpus-forensics kb download --source all   # no LLM calls, ~150 MB
+uv run corpus-forensics kb ingest --source all --reset
+```
+
+| Source | Content | License | Entries loaded |
+|---|---|---|---|
+| [deepset/prompt-injections](https://huggingface.co/datasets/deepset/prompt-injections) | Injection prompts (EN/DE), `train` split only | Apache-2.0 | 203 |
+| [BIPIA](https://github.com/microsoft/BIPIA) | Indirect-injection instructions, `train` categories only (test categories are reserved for evaluation) | MIT | 125 |
+| [HackAPrompt](https://huggingface.co/datasets/hackaprompt/hackaprompt-dataset) | Successful competition attacks, deterministic sample stratified by level | MIT, gated: needs `CF_HF_TOKEN` | 400 |
+| [MITRE ATLAS](https://github.com/mitre-atlas/atlas-data) | Prompt-injection techniques and real case-study steps, with official mitigations | Apache-2.0 | 55 |
+| [OWASP LLM01/LLM07 2025](https://genai.owasp.org/llmrisk/llm01-prompt-injection/) | Example attack scenarios and prevention strategies | CC BY-SA 4.0 | 11 |
+
+Entries are not labeled with an attack type yet (`attack_type: otro`, metadata
+`etiquetado: pendiente`); each keeps its original category in the metadata.
+
+### 1c. Literature Collection (papers and reports)
+
+A second Chroma collection, `literatura`, holds passages from 27 high-priority papers and
+technical reports that **explain** the attack types (NIST AI 100-2 E2025, OWASP LLM01/LLM07,
+Greshake et al., PoisonedRAG, Jailbroken, Bad Characters, Spotlighting, etc.). The list,
+with license and coverage per source, is versioned in
+`data/knowledge_base/literature_sources.yaml`; the documents are downloaded locally and
+never committed.
+
+```bash
+uv run corpus-forensics lit download        # 30 files (PDF + HTML), polite 3 s delay
+uv run corpus-forensics lit build           # Docling -> markdown -> ~1,900 chunks of ~350 tokens
+uv run corpus-forensics lit ingest --reset  # embeddings (~465k tokens, about USD 0.01)
+uv run corpus-forensics lit stats
+uv run corpus-forensics lit search "markdown image exfiltration"
+```
+
+- PDFs are converted with [Docling](https://github.com/docling-project/docling) (pure Python,
+  no Docker; first run downloads its ~170 MB layout model). OCR and table-structure models
+  are disabled: the papers are born-digital and their tables are mostly numeric results.
+- Chunks never cross a section; references and acknowledgements are dropped; each chunk is
+  embedded with a `title | section` header.
+- The knowledge base is itself sanitized: Unicode Tag characters, zero-width and bidi
+  controls are made visible, and chunks quoting literal payloads get `contiene_payload`.
+- Each chunk carries keyword labels (`cubre_inyeccion`, `cubre_exfiltracion`, ...) and the
+  source license class, so retrieval can filter by topic.
+- Embeddings are cached in `data/cache/`, so re-ingesting never pays twice.
+
 ### 2. View Knowledge Base Statistics
 Inspect stored signatures by source and attack type:
 

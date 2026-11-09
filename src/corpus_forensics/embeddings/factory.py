@@ -4,10 +4,12 @@ from collections.abc import Callable
 from typing import Any
 
 from corpus_forensics.embeddings.base import Embedder
+from corpus_forensics.embeddings.litellm_embedder import LiteLLMEmbedder
 from corpus_forensics.embeddings.mock import MockEmbedder
 
 _EMBEDDER_REGISTRY: dict[str, Callable[..., Embedder] | type[Embedder]] = {
     "mock": MockEmbedder,
+    "litellm": LiteLLMEmbedder,
 }
 
 
