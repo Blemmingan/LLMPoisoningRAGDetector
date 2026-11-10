@@ -13,7 +13,7 @@ from pathlib import Path
 
 from corpus_forensics.analysis.aggregator import FindingAggregator
 from corpus_forensics.analysis.analyst import LLM_ERROR_PREFIX, ChunkAnalyst
-from corpus_forensics.analysis.prompt_builder import PromptBuilder
+from corpus_forensics.analysis.prompt_builder import PromptBuilder, resolve_prompt_path
 from corpus_forensics.analysis.retriever import AttackRetriever
 from corpus_forensics.analysis.trace import ChunkTrace, build_chunk_trace
 from corpus_forensics.analysis.verdict import VerdictPolicy
@@ -83,14 +83,17 @@ class ForensicPipeline:
             use_normalized_text=self.settings.normalize_for_retrieval,
         )
 
-        self.prompt_builder = PromptBuilder(output_language=self.settings.report_language)
+        self.prompt_builder = PromptBuilder(
+            template_path=resolve_prompt_path(self.settings.analyst_prompt),
+            output_language=self.settings.report_language,
+        )
         self.analyst = ChunkAnalyst(
             llm_client=self.llm_client,
             prompt_builder=self.prompt_builder,
         )
 
         self.aggregator = FindingAggregator()
-        self.verifier = FindingVerifier()
+        self.verifier = FindingVerifier(penalize=self.settings.verifier_penalize)
         self.verdict_policy = VerdictPolicy.from_settings(self.settings)
         self.last_trace: list[ChunkTrace] = []
 

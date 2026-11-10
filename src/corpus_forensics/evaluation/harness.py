@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from corpus_forensics.analysis.pipeline import ForensicPipeline
-from corpus_forensics.config import Settings, get_settings
+from corpus_forensics.config import Settings
 from corpus_forensics.evaluation.dataset import EvalDatasetLoader
 from corpus_forensics.evaluation.metrics import EvaluationMetrics, compute_all_metrics
 from corpus_forensics.evaluation.records import (
@@ -94,6 +94,8 @@ def run_config(
         "chunk_overlap": settings.chunk_overlap,
         "chunk_unit": settings.chunk_unit,
         "normalize_for_retrieval": settings.normalize_for_retrieval,
+        "analyst_prompt": settings.analyst_prompt,
+        "verifier_penalize": settings.verifier_penalize,
         "verdict_threshold": settings.verdict_threshold,
         "verdict_require_verified": settings.verdict_require_verified,
         "verdict_min_severity": settings.verdict_min_severity,
@@ -112,6 +114,7 @@ class EvaluationHarness:
         dataset_dir: Path | str,
         output_dir: Path | str | None = None,
         retrieval_only: bool = False,
+        extra_config: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Run the pipeline over the dataset, then write predictions and metrics.
 
@@ -120,8 +123,9 @@ class EvaluationHarness:
             output_dir: Where predictions.jsonl, eval_summary.json and eval_summary.md go.
             retrieval_only: Only load, chunk and retrieve (no LLM call, no cost): measures
                 the retriever.
+            extra_config: Extra entries for run_config.json (e.g. the ablation variant).
         """
-        settings = get_settings()
+        settings = self.pipeline.settings
         dataset_path = Path(dataset_dir)
         out_path = Path(output_dir or settings.output_dir / "eval")
         samples = EvalDatasetLoader(dataset_path).load()
@@ -151,6 +155,7 @@ class EvaluationHarness:
             )
 
         config = run_config(settings, self.pipeline, dataset_path, retrieval_only)
+        config.update(extra_config or {})
         return write_outputs(records, config, out_path)
 
 

@@ -1,0 +1,50 @@
+# Ablation study: each variant overrides settings (the CF_* variables, lowercase, no prefix).
+# `requires_llm: true` = the variant only changes what the analyst LLM does; with
+# --retrieval-only it is skipped (its retrieval would be identical to the base).
+variants:
+  - name: base
+    description: Configuración por defecto
+    overrides: {}
+
+  - name: sin_normalizacion
+    description: Busca con el texto crudo en vez de la vista normalizada
+    question: ¿Sirve la normalización defensiva para los ataques disfrazados?
+    overrides:
+      normalize_for_retrieval: false
+
+  - name: chunks_grandes
+    description: Chunks de 1000 caracteres con overlap 200 (base 500/100)
+    question: ¿El ataque se diluye en chunks más grandes?
+    overrides:
+      chunk_size: 1000
+      chunk_overlap: 200
+
+  - name: sin_ejemplos
+    description: Sin RAG de ataques conocidos (top_k = 0); el LLM decide solo con la literatura
+    question: ¿El RAG de ejemplos mejora al LLM solo?
+    requires_llm: true
+    overrides:
+      top_k: 0
+
+  - name: sin_literatura
+    description: Sin el segundo retrieval de literatura (literature_top_k = 0)
+    question: ¿Aporta la literatura al analista?
+    requires_llm: true
+    overrides:
+      literature_top_k: 0
+
+  - name: sin_verificador
+    description: Sin descuento de confianza ni exigencia de fragmento verificado
+    question: ¿Cuánta precisión aporta el control anti-alucinación?
+    requires_llm: true
+    # same prompts as the base: answered from the LLM cache at no cost
+    overrides:
+      verifier_penalize: false
+      verdict_require_verified: false
+
+  - name: prompt_sin_hard_negatives
+    description: Prompt sin la política ni los ejemplos de hard negatives
+    question: ¿Los ejemplos bajan los falsos positivos en textos que hablan de ataques?
+    requires_llm: true
+    overrides:
+      analyst_prompt: analyst_prompt_sin_hard_negatives

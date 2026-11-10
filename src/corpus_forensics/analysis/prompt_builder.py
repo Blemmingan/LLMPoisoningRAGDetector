@@ -5,7 +5,17 @@ from pathlib import Path
 from corpus_forensics.schemas import Chunk, RetrievedAttack
 from corpus_forensics.vectorstore.literature_store import LiteraturePassage
 
-PROMPT_TEMPLATE_PATH = Path(__file__).resolve().parent / "prompts" / "analyst_prompt.txt"
+PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
+PROMPT_TEMPLATE_PATH = PROMPTS_DIR / "analyst_prompt.txt"
+
+
+def resolve_prompt_path(name_or_path: str) -> Path:
+    """A prompt name in analysis/prompts/ (e.g. 'analyst_prompt') or a path to a .txt file."""
+    candidate = Path(name_or_path)
+    if candidate.suffix == ".txt" and candidate.exists():
+        return candidate
+    return PROMPTS_DIR / f"{name_or_path.removesuffix('.txt')}.txt"
+
 
 # ISO codes accepted in CF_REPORT_LANGUAGE; any other value is passed to the prompt as-is.
 LANGUAGE_NAMES = {"es": "Spanish", "en": "English", "pt": "Portuguese"}

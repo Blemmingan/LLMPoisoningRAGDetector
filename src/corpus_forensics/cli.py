@@ -390,6 +390,72 @@ def eval_run(
     _print_metrics(results)
 
 
+@eval_app.command(name="ablation")
+@stop_on_budget
+def eval_ablation(
+    dataset: Annotated[Path, typer.Option("--dataset", "-d", help="Labeled dataset.")] = Path(
+        "data/eval/v1"
+    ),
+    out: Annotated[Path, typer.Option("--out", "-o", help="One folder per variant.")] = Path(
+        "reports/ablation"
+    ),
+    config: Annotated[Path, typer.Option("--config", "-c", help="Variants file (YAML).")] = Path(
+        "data/eval/ablations.yaml"
+    ),
+    only: Annotated[
+        str | None, typer.Option("--only", help="Comma-separated variant names to run.")
+    ] = None,
+    retrieval_only: Annotated[
+        bool,
+        typer.Option("--retrieval-only", help="No LLM calls; skips variants that need the LLM."),
+    ] = False,
+    force: Annotated[
+        bool, typer.Option("--force", help="Re-run variants that already have results.")
+    ] = False,
+    summary_only: Annotated[
+        bool, typer.Option("--summary-only", help="Only rebuild the comparison table.")
+    ] = False,
+) -> None:
+    """Run the ablation variants and build the comparison table."""
+    from corpus_forensics.evaluation.ablation import load_variants, run_ablation, summarize
+
+    if summary_only:
+        summary = summarize(out, load_variants(config))
+    else:
+        summary = run_ablation(
+            dataset,
+            out,
+            config,
+            only=[n.strip() for n in only.split(",")] if only else None,
+            retrieval_only=retrieval_only,
+            force=force,
+        )
+    for name, state in summary.get("estado", {}).items():
+        rprint(f"[cyan]{name}[/cyan]: {state}")
+    table = Table(title="Ablation (value and difference against base)")
+    for column in ("Variant", "Context Precision", "CP disguised", "F1", "FPR hard neg.", "USD"):
+        table.add_column(column)
+
+    def cell(row: dict[str, Any], key: str) -> str:
+        value = row.get(key)
+        if value is None:
+            return "—"
+        delta = row.get("delta", {}).get(key)
+        return f"{value:.3f}" + (f" ({delta:+.3f})" if delta else "")
+
+    for row in summary["variantes"]:
+        table.add_row(
+            row["variante"],
+            cell(row, "context_precision"),
+            cell(row, "cp_disfrazados"),
+            cell(row, "f1"),
+            cell(row, "fpr_hard_negatives"),
+            str(row.get("costo_usd")),
+        )
+    console.print(table)
+    rprint(f"[dim]Summary: {out / 'ablation_summary.md'}[/dim]")
+
+
 @eval_app.command(name="metrics")
 def eval_metrics(
     predictions: Annotated[

@@ -305,6 +305,33 @@ cites the one that supports its mitigation in `fuente_mitigacion_id`. The pipeli
 to title, section and URL (`fuente_mitigacion`) only when that passage was actually retrieved
 for the chunk; an invented id stays unresolved and counts against faithfulness.
 
+**Ablation study.** Variants are defined in `data/eval/ablations.yaml` (name, question and
+setting overrides); `eval ablation` runs each one into its own folder and writes
+`ablation_summary.md` with every metric and its difference against `base`:
+
+```bash
+# variants measurable without the LLM (free): base, sin_normalizacion, chunks_grandes
+uv run corpus-forensics eval ablation --retrieval-only --out reports/ablation-retrieval
+# all variants with the real LLM; run `base` first so `sin_verificador` (same prompts)
+# is answered from the LLM cache at no cost
+uv run corpus-forensics eval ablation --only base --out reports/ablation
+uv run corpus-forensics eval ablation --out reports/ablation
+```
+
+| Variant | What changes | Question |
+|---|---|---|
+| `base` | Default configuration | Reference |
+| `sin_normalizacion` | Retrieval with the raw chunk text | Does the defensive normalization help disguised attacks? |
+| `chunks_grandes` | 1000-character chunks (overlap 200) instead of 500 | Is the attack diluted in larger chunks? |
+| `sin_ejemplos` | No known-attack retrieval (`top_k=0`) | Does the RAG of examples improve the LLM alone? |
+| `sin_literatura` | No literature retrieval (`literature_top_k=0`) | Does the literature help the analyst? |
+| `sin_verificador` | No confidence penalty, verified fragment not required | How much precision does the anti-hallucination check add? |
+| `prompt_sin_hard_negatives` | Prompt without the hard-negative policy and examples | Do the examples lower false positives on texts about attacks? |
+
+Folders that already have results are skipped (`--force` re-runs them), so a paid run is never
+repeated; `--summary-only` rebuilds the table. Variants marked `requires_llm` are skipped with
+`--retrieval-only`, since their retrieval equals the base.
+
 Retriever scores are read against **chance levels** (what a random retriever would hit given
 each type's share of the knowledge base: 77% of the examples are direct injection). The
 report also includes a similarity-only baseline (AUROC of the document's top-1 similarity),

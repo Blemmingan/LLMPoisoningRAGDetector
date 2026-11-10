@@ -59,8 +59,8 @@ class AttackRetriever:
         Returns:
             List of RetrievedAttack items.
         """
-        if not chunk.text.strip() or self.vector_store.count() == 0:
-            return []
+        if self.top_k <= 0 or not chunk.text.strip() or self.vector_store.count() == 0:
+            return []  # top_k <= 0 disables the examples step (ablation: LLM alone)
 
         if query_embedding is None:
             query_embedding = self.embedder.embed_query(self.query_text(chunk))

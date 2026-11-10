@@ -31,6 +31,13 @@ def hidden_section_at(hidden_text: str, offset: int) -> str | None:
 class FindingVerifier:
     """Performs anti-hallucination validation and sanity checks on forensic findings."""
 
+    def __init__(self, penalize: bool = True) -> None:
+        """Args:
+        penalize: Lower the confidence of findings whose fragment is not in the document
+            (disabled only for the ablation study).
+        """
+        self.penalize = penalize
+
     def verify(self, findings: list[Hallazgo], document: Document) -> list[Hallazgo]:
         """Verify each finding against the source document.
 
@@ -93,7 +100,8 @@ class FindingVerifier:
                 # Anti-hallucination failure: model quoted text that does not exist in the source document
                 finding.verificado = False
                 # Penalize confidence score drastically
-                finding.confianza = round(max(0.0, finding.confianza * 0.2), 2)
+                if self.penalize:
+                    finding.confianza = round(max(0.0, finding.confianza * 0.2), 2)
                 finding.notas_verificacion = (
                     "Anti-hallucination check FAILED: 'fragmento_exacto' does not exist verbatim "
                     "in the source document."

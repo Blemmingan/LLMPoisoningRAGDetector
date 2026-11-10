@@ -71,6 +71,17 @@ class Settings(BaseSettings):
         description="Literature passages added to the analyst prompt (0 disables the step)",
     )
 
+    # Analyst prompt: file name in analysis/prompts/ (without .txt) or a path (ablation)
+    analyst_prompt: str = Field(
+        default="analyst_prompt",
+        description="Analyst prompt template: name in analysis/prompts/ or path to a .txt file",
+    )
+    # Verifier: lower the confidence of findings whose fragment is not in the document
+    verifier_penalize: bool = Field(
+        default=True,
+        description="Multiply the confidence of unverified findings by 0.2 (anti-hallucination)",
+    )
+
     # Document verdict: a document is malicious when at least one finding passes the policy
     verdict_threshold: float = Field(
         default=0.5, ge=0.0, le=1.0, description="Minimum finding confidence to flag a document"
