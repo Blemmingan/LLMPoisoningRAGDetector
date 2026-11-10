@@ -75,7 +75,7 @@ class Chunker:
             end = min(start + self.chunk_size, total_len)
             chunk_text = text[start:end]
 
-            _, annotations = normalize_and_annotate(chunk_text)
+            normalized, annotations = normalize_and_annotate(chunk_text)
 
             chunks.append(
                 Chunk(
@@ -86,6 +86,7 @@ class Chunker:
                     end=end,
                     index=idx,
                     annotations=annotations,
+                    normalized_text=normalized,
                 )
             )
             idx += 1
@@ -115,7 +116,7 @@ class Chunker:
             end_char = token_matches[token_end - 1].end()
             chunk_text = text[start_char:end_char]
 
-            _, annotations = normalize_and_annotate(chunk_text)
+            normalized, annotations = normalize_and_annotate(chunk_text)
 
             chunks.append(
                 Chunk(
@@ -126,6 +127,7 @@ class Chunker:
                     end=end_char,
                     index=idx,
                     annotations=annotations,
+                    normalized_text=normalized,
                 )
             )
             idx += 1

@@ -157,6 +157,29 @@ Calls to the proxy stop the whole run at the first "no credit" answer (HTTP 429
 `insufficient_quota`) instead of retrying; only transient errors (network, 5xx, real rate
 limits) are retried, twice.
 
+### 1b-ter. Defensive Normalization (preprocessing)
+
+Each chunk gets a `normalized_text` (`preprocessing/normalizer.py::canonicalize`) that shows
+what a model would actually read:
+
+1. Unicode Tag characters (U+E0000-E007F, "ASCII smuggling") are revealed as a visible
+   `[UNICODE_TAGS: ...]` marker.
+2. Zero-width characters, bidi controls (Trojan Source) and variation selectors are removed.
+3. NFKC folds fullwidth, circled and mathematical letters.
+4. Cyrillic/Greek look-alikes inside Latin words are folded (subset of UTS #39 confusables);
+   genuine Russian or Greek text is left untouched.
+5. Decoded base64 blobs are appended as `[BASE64_DECODED: ...]`.
+
+Retrieval searches with `normalized_text` (`CF_NORMALIZE_FOR_RETRIEVAL=true`, ablation flag)
+and the analyst prompt shows it as a separate "normalized view". Findings must still quote
+the original text, so offsets and verification are unchanged.
+
+Observed so far: `multilingual-e5`'s tokenizer already applies NFKC, so step 3 alone does not
+change its embeddings; the gain is expected on Unicode Tags, invisible characters, Cyrillic
+homoglyphs and base64, and in what the LLM analyst gets to see. The current knowledge base
+has few such examples (BIPIA's "Base Encoding" category asks the model to *answer* in
+base64; it is not encoded text), so the effect has to be measured on the evaluation set.
+
 ### 1c. Literature Collection (papers and reports)
 
 A second Chroma collection, `literatura`, holds passages from 27 high-priority papers and

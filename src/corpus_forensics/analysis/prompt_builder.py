@@ -68,6 +68,7 @@ class PromptBuilder:
             preprocessing_annotations=annotations_summary,
             retrieved_attacks=retrieved_summary,
             retrieved_literature=literature_summary,
+            normalized_view=self._format_normalized_view(chunk),
             output_language=self.output_language,
         )
 
@@ -91,6 +92,14 @@ class PromptBuilder:
             comms = annotations.get("html_comments", [])
             parts.append(f"- HTML comments detected ({len(comms)} blocks): {comms[:2]}")
 
+        if annotations.get("has_unicode_tags"):
+            tags = annotations.get("canonical", {}).get("unicode_tags", [])
+            parts.append(f"- Hidden Unicode Tag characters decoded ({len(tags)} runs): {tags[:2]}")
+
+        if annotations.get("has_homoglyphs"):
+            n = annotations.get("canonical", {}).get("confusables_folded", 0)
+            parts.append(f"- Look-alike characters folded to Latin (homoglyphs: {n} confusables).")
+
         if annotations.get("unicode", {}).get("changed"):
             parts.append(
                 "- Unicode normalization altered text (potential homoglyphs/decomposed chars)."
@@ -112,6 +121,12 @@ class PromptBuilder:
                 f"  Mitigation: {a.mitigation}"
             )
         return "\n".join(lines)
+
+    def _format_normalized_view(self, chunk: Chunk) -> str:
+        """Normalized text when it differs from the original chunk."""
+        if not chunk.normalized_text or chunk.normalized_text == chunk.text:
+            return "Identical to the chunk text (no hidden or obfuscated content found)."
+        return chunk.normalized_text
 
     def _format_retrieved_literature(self, passages: list[LiteraturePassage]) -> str:
         """Render retrieved literature passages from security research papers and standards."""

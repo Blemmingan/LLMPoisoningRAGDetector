@@ -58,6 +58,12 @@ class Settings(BaseSettings):
     chunk_overlap: int = Field(default=100, description="Chunk overlap in characters or tokens")
     chunk_unit: str = Field(default="char", description="Unit for chunking: 'char' or 'token'")
 
+    # Preprocessing: search with the defensive normalization of each chunk (ablation flag)
+    normalize_for_retrieval: bool = Field(
+        default=True,
+        description="Embed the normalized chunk (decoded, de-obfuscated) instead of the raw text",
+    )
+
     # Retrieval configuration
     top_k: int = Field(default=3, description="Number of nearest attack entries to retrieve")
     literature_top_k: int = Field(

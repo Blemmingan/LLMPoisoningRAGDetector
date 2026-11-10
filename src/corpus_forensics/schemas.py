@@ -145,6 +145,13 @@ class Chunk(BaseModel):
         default_factory=dict,
         description="Normalizer annotations such as zero-width chars, base64 blobs, language hints",
     )
+    normalized_text: str = Field(
+        default="",
+        description=(
+            "Defensive normalization of `text` (tags revealed, invisibles stripped, NFKC, "
+            "confusables folded, base64 decoded). Used for retrieval; offsets refer to `text`."
+        ),
+    )
 
 
 # -----------------------------------------------------------------------------

@@ -16,6 +16,7 @@ class AttackRetriever:
         top_k: int = 3,
         literature_store: LiteratureStore | None = None,
         literature_top_k: int = 2,
+        use_normalized_text: bool = True,
     ) -> None:
         """Initialize retriever.
 
@@ -25,18 +26,26 @@ class AttackRetriever:
             top_k: Number of nearest attack entries to retrieve.
             literature_store: Optional Chroma store containing research literature passages.
             literature_top_k: Number of nearest literature passages to retrieve.
+            use_normalized_text: Search with the chunk's defensive normalization.
         """
         self.vector_store = vector_store
         self.embedder = embedder
         self.top_k = top_k
         self.literature_store = literature_store
         self.literature_top_k = literature_top_k
+        self.use_normalized_text = use_normalized_text
+
+    def query_text(self, chunk: Chunk) -> str:
+        """Text used to search: the normalized view when enabled and available."""
+        if self.use_normalized_text and chunk.normalized_text.strip():
+            return chunk.normalized_text
+        return chunk.text
 
     def embed_chunk(self, chunk: Chunk) -> list[float] | None:
         """Embed a chunk once so both retrieval steps can reuse the same vector."""
         if not chunk.text.strip():
             return None
-        return self.embedder.embed_query(chunk.text)
+        return self.embedder.embed_query(self.query_text(chunk))
 
     def retrieve_for_chunk(
         self, chunk: Chunk, query_embedding: list[float] | None = None
@@ -54,7 +63,7 @@ class AttackRetriever:
             return []
 
         if query_embedding is None:
-            query_embedding = self.embedder.embed_query(chunk.text)
+            query_embedding = self.embedder.embed_query(self.query_text(chunk))
         return self.vector_store.query(query_embedding=query_embedding, top_k=self.top_k)
 
     def retrieve_literature_for_chunk(
@@ -82,7 +91,7 @@ class AttackRetriever:
             return []
 
         if query_embedding is None:
-            query_embedding = self.embedder.embed_query(chunk.text)
+            query_embedding = self.embedder.embed_query(self.query_text(chunk))
         # Over-fetch so that dropping payload passages still leaves enough results.
         candidates = self.literature_store.query(
             query_embedding=query_embedding, top_k=self.literature_top_k * 3 + 2

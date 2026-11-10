@@ -78,6 +78,7 @@ class ForensicPipeline:
             top_k=self.settings.top_k,
             literature_store=self.literature_store,
             literature_top_k=self.settings.literature_top_k,
+            use_normalized_text=self.settings.normalize_for_retrieval,
         )
 
         self.prompt_builder = PromptBuilder(output_language=self.settings.report_language)
