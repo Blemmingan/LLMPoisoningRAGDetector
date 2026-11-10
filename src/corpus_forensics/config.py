@@ -71,6 +71,19 @@ class Settings(BaseSettings):
         description="Literature passages added to the analyst prompt (0 disables the step)",
     )
 
+    # Document verdict: a document is malicious when at least one finding passes the policy
+    verdict_threshold: float = Field(
+        default=0.5, ge=0.0, le=1.0, description="Minimum finding confidence to flag a document"
+    )
+    verdict_require_verified: bool = Field(
+        default=True,
+        description="Only count findings whose fragment was found verbatim in the document",
+    )
+    verdict_min_severity: str = Field(
+        default="baja",
+        description="Minimum finding severity that counts: 'baja', 'media', 'alta' or 'critica'",
+    )
+
     # Provider configurations (default to mock implementations)
     llm_provider: str = Field(default="mock", description="LLM provider name: 'mock', etc.")
     embedder_provider: str = Field(

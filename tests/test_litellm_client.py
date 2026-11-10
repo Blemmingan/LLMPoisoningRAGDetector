@@ -34,6 +34,7 @@ def _answer() -> AnalisisChunkLLM:
                 ataque_similar_id="SAMPLE-ATTACK-001",
                 posible_variante_nueva=False,
                 mitigacion="Remove the instruction",
+                fuente_mitigacion_id=None,
             )
         ],
     )

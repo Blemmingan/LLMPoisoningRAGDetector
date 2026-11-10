@@ -16,6 +16,7 @@ from corpus_forensics.analysis.analyst import LLM_ERROR_PREFIX, ChunkAnalyst
 from corpus_forensics.analysis.prompt_builder import PromptBuilder
 from corpus_forensics.analysis.retriever import AttackRetriever
 from corpus_forensics.analysis.trace import ChunkTrace, build_chunk_trace
+from corpus_forensics.analysis.verdict import VerdictPolicy
 from corpus_forensics.analysis.verifier import FindingVerifier
 from corpus_forensics.config import Settings, get_settings
 from corpus_forensics.embeddings.base import Embedder
@@ -90,6 +91,7 @@ class ForensicPipeline:
 
         self.aggregator = FindingAggregator()
         self.verifier = FindingVerifier()
+        self.verdict_policy = VerdictPolicy.from_settings(self.settings)
         self.last_trace: list[ChunkTrace] = []
 
     def _retrieve(self, chunk: Chunk) -> tuple[list[RetrievedAttack], list[LiteraturePassage]]:
@@ -147,9 +149,8 @@ class ForensicPipeline:
         # 6. Anti-hallucination Verification (literal substring checks)
         verified_findings = self.verifier.verify(aggregated_findings, doc)
 
-        # Determine document-level verdict
-        # Document is malicious if any verified finding has confidence >= 0.5
-        is_malicious = any(h.confianza >= 0.5 for h in verified_findings)
+        # Document-level verdict (configurable policy: threshold, verified, severity)
+        is_malicious = self.verdict_policy.is_malicious(verified_findings)
 
         # 7. Construct Report
         metadata = AnalisisMetadata(
@@ -159,6 +160,7 @@ class ForensicPipeline:
             embedder_is_mock=self.embedder.is_mock,
             llm_provider=self.llm_client.provider_name,
             llm_model=getattr(self.llm_client, "model", None),
+            verdict_policy=self.verdict_policy.describe(),
             n_chunks_failed=sum(
                 1
                 for cf in chunk_findings

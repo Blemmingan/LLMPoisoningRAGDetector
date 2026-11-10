@@ -14,7 +14,8 @@ Retriever (no LLM needed):
 Generator:
 - Faithfulness: share of a finding's checkable claims that the context supports: the
   quoted fragment is verbatim in the document (verifier), the cited example is one that
-  was actually retrieved, and the declared type matches the cited example's type.
+  was actually retrieved, the declared type matches the cited example's type, and the
+  literature passage cited for the mitigation was actually retrieved.
 - Answer relevance: the class's reference-free version (questions generated from the
   answer) fits free text; our answer is a labeled classification, so it is measured
   against the ground truth: precision/recall/F1, macro-F1 by attack type, confusion
@@ -35,11 +36,13 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from corpus_forensics.analysis.trace import ChunkTrace
+from corpus_forensics.analysis.verdict import VerdictPolicy
 from corpus_forensics.evaluation.records import PredictionRecord
 from corpus_forensics.schemas import (
     CategoriaDocumento,
     DocumentReport,
     Hallazgo,
+    Severidad,
     TecnicaDeOcultamiento,
 )
 
@@ -91,6 +94,7 @@ class EvaluationMetrics(BaseModel):
     abilities: dict[str, Any] | None = None
     cost: dict[str, Any] = Field(default_factory=dict)
     quadrants: list[dict[str, Any]] = Field(default_factory=list)
+    threshold_sweep: dict[str, Any] | None = None
     slices: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -395,6 +399,11 @@ def faithfulness_claims(record: PredictionRecord) -> list[float]:
             )
             claims.append(cited is not None)
             claims.append(cited is not None and cited.attack_type == finding.tipo_de_ataque.value)
+        if finding.fuente_mitigacion_id:
+            trace = traces.get(finding.indice_chunk)
+            claims.append(
+                any(p.id == finding.fuente_mitigacion_id for p in (trace.passages if trace else []))
+            )
         scores.append(sum(claims) / len(claims))
     return scores
 
@@ -567,6 +576,73 @@ def quadrant_table(
     return rows
 
 
+SWEEP_THRESHOLDS = tuple(round(0.05 * i, 2) for i in range(1, 20))
+
+
+def policy_from_config(config: dict[str, Any]) -> VerdictPolicy:
+    """The verdict policy a run used (defaults when the config does not say)."""
+    defaults = VerdictPolicy()
+    return VerdictPolicy(
+        threshold=config.get("verdict_threshold", defaults.threshold),
+        require_verified=config.get("verdict_require_verified", defaults.require_verified),
+        min_severity=config.get("verdict_min_severity", defaults.min_severity),
+    )
+
+
+def threshold_sweep(records: list[PredictionRecord], policy: VerdictPolicy) -> dict[str, Any]:
+    """Re-decide every document at each threshold from the saved findings.
+
+    Uses the run's policy (verified fragment, minimum severity) and only moves the
+    confidence threshold, so the threshold can be chosen from one LLM run without new calls.
+    """
+    analyzed = [(r, r.report) for r in records if r.report is not None]
+    scores = [
+        (r, policy.score(rep.hallazgos), any(policy.counts(h) for h in rep.hallazgos))
+        for r, rep in analyzed
+    ]
+    rows = []
+    for threshold in SWEEP_THRESHOLDS:
+        flagged = [(r, eligible and score >= threshold) for r, score, eligible in scores]
+        det = classification_metrics([(r.label.malicioso, f) for r, f in flagged])
+
+        def fpr(
+            category: CategoriaDocumento, flagged: list[tuple[PredictionRecord, bool]] = flagged
+        ) -> float | None:
+            docs = [f for r, f in flagged if r.label.categoria == category]
+            return round(sum(docs) / len(docs), 4) if docs else None
+
+        rows.append(
+            {
+                "umbral": threshold,
+                "precision": det["precision"],
+                "recall": det["recall"],
+                "f1": det["f1"],
+                "fpr_hard_negatives": fpr(CategoriaDocumento.HARD_NEGATIVE),
+                "fpr_limpios": fpr(CategoriaDocumento.LIMPIO),
+            }
+        )
+    best = max(rows, key=lambda row: (row["f1"], row["umbral"])) if rows else None
+    positives = [s for r, s, e in scores if r.label.malicioso]
+    negatives = [s for r, s, e in scores if not r.label.malicioso]
+    return {
+        "filtros": ", ".join(
+            [
+                *(["fragmento verificado"] if policy.require_verified else []),
+                *(
+                    [f"severidad >= {policy.min_severity.value}"]
+                    if policy.min_severity != Severidad.BAJA
+                    else []
+                ),
+            ]
+        )
+        or "ninguno",
+        "umbral_actual": policy.threshold,
+        "mejor_f1": best,
+        "auroc_score_documento": auroc(positives, negatives),
+        "filas": rows,
+    }
+
+
 def compute_all_metrics(
     records: list[PredictionRecord], config: dict[str, Any] | None = None
 ) -> EvaluationMetrics:
@@ -583,5 +659,8 @@ def compute_all_metrics(
         abilities=ability_metrics(records) if has_reports else None,
         cost=cost_metrics(records),
         quadrants=quadrant_table(retriever, generator),
+        threshold_sweep=threshold_sweep(records, policy_from_config(config or {}))
+        if has_reports
+        else None,
         slices=slice_metrics(records, per_doc),
     )

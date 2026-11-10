@@ -76,6 +76,13 @@ def render_report_to_markdown(report: DocumentReport) -> str:
             lines.append("```")
             lines.append("")
             lines.append(f"**Mitigación Recomendada:** {h.mitigacion}")
+            if h.fuente_mitigacion:
+                lines.append(f"_Fuente:_ {h.fuente_mitigacion}")
+            elif h.fuente_mitigacion_id:
+                lines.append(
+                    f"_Fuente citada no verificada:_ `{h.fuente_mitigacion_id}` "
+                    "(no estaba entre los pasajes recuperados)"
+                )
             lines.append("")
             lines.append("---")
             lines.append("")

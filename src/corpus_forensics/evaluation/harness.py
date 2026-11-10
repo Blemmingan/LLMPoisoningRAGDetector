@@ -94,6 +94,9 @@ def run_config(
         "chunk_overlap": settings.chunk_overlap,
         "chunk_unit": settings.chunk_unit,
         "normalize_for_retrieval": settings.normalize_for_retrieval,
+        "verdict_threshold": settings.verdict_threshold,
+        "verdict_require_verified": settings.verdict_require_verified,
+        "verdict_min_severity": settings.verdict_min_severity,
         "kb_por_tipo": kb_by_type,
     }
 

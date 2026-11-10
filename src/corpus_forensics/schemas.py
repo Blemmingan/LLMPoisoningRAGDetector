@@ -212,6 +212,17 @@ class Hallazgo(BaseModel):
         description="True if the attack exhibits characteristics not directly matched in the KB",
     )
     mitigacion: str = Field(description="Recommended defensive mitigation or containment action")
+    fuente_mitigacion_id: str | None = Field(
+        default=None,
+        description="ID of the literature passage the analyst cited for the mitigation",
+    )
+    fuente_mitigacion: str | None = Field(
+        default=None,
+        description=(
+            "Cited source (title, section, URL); filled only when the cited passage was "
+            "actually retrieved for this chunk"
+        ),
+    )
     verificado: bool = Field(
         default=False,
         description="True if literal-match verification succeeded against source text",
@@ -249,6 +260,11 @@ class HallazgoLLM(BaseModel):
         description="True if no retrieved known attack is a close match"
     )
     mitigacion: str = Field(description="Concrete mitigation for this finding")
+    fuente_mitigacion_id: str | None = Field(
+        description=(
+            "REF id of the literature excerpt that supports the mitigation, or null if none does"
+        )
+    )
 
 
 class AnalisisChunkLLM(BaseModel):
@@ -288,6 +304,9 @@ class AnalisisMetadata(BaseModel):
     llm_model: str | None = Field(default=None, description="Chat model used, if any")
     n_chunks_failed: int = Field(
         default=0, description="Chunks whose LLM analysis failed and were treated as clean"
+    )
+    verdict_policy: str | None = Field(
+        default=None, description="Policy that decided the document verdict"
     )
     timestamp: str = Field(
         default_factory=lambda: datetime.now(UTC).isoformat(),

@@ -293,6 +293,18 @@ dataset label. Everything is computed deterministically (no LLM judge).
 | Information integration | Not applicable (one document at a time). | — |
 | Cost | Latency (median, p95), chunks, calls, tokens, USD from the usage ledger. | — |
 
+**Verdict policy.** A document is flagged when at least one finding has confidence ≥
+`CF_VERDICT_THRESHOLD` (0.5), a verified fragment (`CF_VERDICT_REQUIRE_VERIFIED`) and a
+minimum severity (`CF_VERDICT_MIN_SEVERITY`). The policy is written in each report's metadata.
+The evaluation re-decides every document at thresholds 0.05–0.95 from the saved findings
+(precision, recall, F1, false positive rates, best-F1 threshold, AUROC of the document
+score), so the threshold is chosen from one LLM run without new calls.
+
+**Mitigation sources.** Literature excerpts reach the analyst with a `REF` id; the analyst
+cites the one that supports its mitigation in `fuente_mitigacion_id`. The pipeline resolves it
+to title, section and URL (`fuente_mitigacion`) only when that passage was actually retrieved
+for the chunk; an invented id stays unresolved and counts against faithfulness.
+
 Retriever scores are read against **chance levels** (what a random retriever would hit given
 each type's share of the knowledge base: 77% of the examples are direct injection). The
 report also includes a similarity-only baseline (AUROC of the document's top-1 similarity),

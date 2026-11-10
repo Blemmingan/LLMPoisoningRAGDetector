@@ -74,12 +74,15 @@ class MockLLMClient(LLMClient):
         if issubclass(schema, AnalisisChunkLLM):
             finding = self._analyze_chunk_finding(prompt)
             llm_fields = set(HallazgoLLM.model_fields)
+            # MOCK: cite the first literature excerpt in the prompt, if any
+            ref = re.search(r"\[REF: ([^\]]+)\]", prompt)
             return schema.model_validate(
                 {
                     "razonamiento": finding.analyst_reasoning or "",
                     "malicioso": finding.malicioso,
                     "hallazgos": [
                         {k: v for k, v in h.model_dump().items() if k in llm_fields}
+                        | {"fuente_mitigacion_id": ref.group(1) if ref else None}
                         for h in finding.hallazgos
                     ],
                 }

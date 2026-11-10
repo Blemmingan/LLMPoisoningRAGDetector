@@ -178,7 +178,7 @@ def render_markdown(metrics: EvaluationMetrics) -> str:
             "",
             f"Media {_fmt(gen['faithfulness']['media'])} sobre {gen['faithfulness']['hallazgos']} "
             "hallazgos (fragmento textual en el documento, ejemplo citado realmente recuperado, "
-            "tipo coherente con el ejemplo citado).",
+            "tipo coherente con el ejemplo citado, fuente de la mitigación realmente recuperada).",
             "",
         ]
     if metrics.abilities is not None:
@@ -207,6 +207,34 @@ def render_markdown(metrics: EvaluationMetrics) -> str:
                 [
                     [q["tipo"], q["retriever_cp"], q["generador_f1"], q.get("accion", "—")]
                     for q in metrics.quadrants
+                ],
+            ),
+            "",
+        ]
+    sweep = metrics.threshold_sweep
+    if sweep is not None:
+        best = sweep.get("mejor_f1") or {}
+        parts += [
+            "## Umbral del veredicto",
+            "",
+            f"Umbral actual {sweep['umbral_actual']}; filtros: {sweep['filtros']}. "
+            f"Mejor F1 {_fmt(best.get('f1'))} con umbral {_fmt(best.get('umbral'))}. "
+            f"AUROC del score del documento (máxima confianza elegible): "
+            f"{_fmt(sweep.get('auroc_score_documento'))}.",
+            "",
+            _table(
+                ["Umbral", "Precision", "Recall", "F1", "FPR hard negatives", "FPR limpios"],
+                [
+                    [
+                        row["umbral"],
+                        row["precision"],
+                        row["recall"],
+                        row["f1"],
+                        row["fpr_hard_negatives"],
+                        row["fpr_limpios"],
+                    ]
+                    for row in sweep["filas"]
+                    if round(row["umbral"] * 100) % 10 == 0 or row is best
                 ],
             ),
             "",

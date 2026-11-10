@@ -18,6 +18,20 @@ logger = logging.getLogger(__name__)
 LLM_ERROR_PREFIX = "LLM_ERROR:"
 
 
+def cite_passage(passage: LiteraturePassage | None) -> str | None:
+    """Human-readable citation of a retrieved literature passage.
+
+    Only passages actually retrieved for the chunk are resolved, so an id the model
+    invented leaves the citation empty (and counts against faithfulness).
+    """
+    if passage is None:
+        return None
+    title = passage.titulo or passage.fuente_id
+    section = f", sección «{passage.seccion}»" if passage.seccion else ""
+    url = f" ({passage.url})" if passage.url else ""
+    return f"{title}{section}{url}"
+
+
 class ChunkAnalyst:
     """Performs forensic analysis on individual document chunks."""
 
@@ -68,10 +82,12 @@ class ChunkAnalyst:
                 analyst_reasoning=f"{LLM_ERROR_PREFIX} {exc}",
             )
 
+        passages = {p.id: p for p in retrieved_literature or []}
         hallazgos = [
             Hallazgo(
                 **{**h.model_dump(), "confianza": min(1.0, max(0.0, h.confianza))},
                 indice_chunk=chunk.index,
+                fuente_mitigacion=cite_passage(passages.get(h.fuente_mitigacion_id or "")),
             )
             for h in output.hallazgos
         ]
