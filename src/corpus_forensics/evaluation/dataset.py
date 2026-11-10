@@ -19,6 +19,7 @@ This loader is tolerant of missing optional fields.
 
 import json
 from pathlib import Path
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -42,6 +43,10 @@ class EvalLabel(BaseModel):
     fragmento_exacto: str | None = None
     posicion: PosicionAtaque | None = None
     sutileza: SutilezaAtaque | None = None
+    extra: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Other fields of the label line (e.g. formato, idioma_texto, fuente_ataque)",
+    )
 
 
 class EvalSample(BaseModel):
@@ -149,4 +154,5 @@ class EvalDatasetLoader:
             fragmento_exacto=data.get("fragmento_exacto"),
             posicion=pos,
             sutileza=sut,
+            extra={k: v for k, v in data.items() if k not in EvalLabel.model_fields},
         )

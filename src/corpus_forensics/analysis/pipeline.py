@@ -15,6 +15,7 @@ from corpus_forensics.analysis.aggregator import FindingAggregator
 from corpus_forensics.analysis.analyst import LLM_ERROR_PREFIX, ChunkAnalyst
 from corpus_forensics.analysis.prompt_builder import PromptBuilder
 from corpus_forensics.analysis.retriever import AttackRetriever
+from corpus_forensics.analysis.trace import ChunkTrace, build_chunk_trace
 from corpus_forensics.analysis.verifier import FindingVerifier
 from corpus_forensics.config import Settings, get_settings
 from corpus_forensics.embeddings.base import Embedder
@@ -23,10 +24,10 @@ from corpus_forensics.ingestion.base import get_loader_for_path
 from corpus_forensics.llm.base import LLMClient
 from corpus_forensics.llm.factory import get_llm_client
 from corpus_forensics.preprocessing.chunker import Chunker
-from corpus_forensics.schemas import AnalisisMetadata, DocumentReport
+from corpus_forensics.schemas import AnalisisMetadata, Chunk, DocumentReport, RetrievedAttack
 from corpus_forensics.vectorstore.base import VectorStore
 from corpus_forensics.vectorstore.chroma_store import ChromaVectorStore
-from corpus_forensics.vectorstore.literature_store import LiteratureStore
+from corpus_forensics.vectorstore.literature_store import LiteraturePassage, LiteratureStore
 
 
 class ForensicPipeline:
@@ -89,9 +90,29 @@ class ForensicPipeline:
 
         self.aggregator = FindingAggregator()
         self.verifier = FindingVerifier()
+        self.last_trace: list[ChunkTrace] = []
+
+    def _retrieve(self, chunk: Chunk) -> tuple[list[RetrievedAttack], list[LiteraturePassage]]:
+        """Retrieve examples and literature for a chunk, embedding it once."""
+        query_embedding = self.retriever.embed_chunk(chunk)
+        attacks = self.retriever.retrieve_for_chunk(chunk, query_embedding)
+        passages = self.retriever.retrieve_literature_for_chunk(chunk, query_embedding)
+        return attacks, passages
+
+    def retrieve_document(self, file_path: Path | str) -> list[ChunkTrace]:
+        """Load, chunk and retrieve only (no LLM call): used to evaluate the retriever."""
+        path = Path(file_path)
+        doc = get_loader_for_path(path).load(path)
+        traces = [
+            build_chunk_trace(c, *self._retrieve(c)) for c in self.chunker.chunk_document(doc)
+        ]
+        self.last_trace = traces
+        return traces
 
     def analyze_document(self, file_path: Path | str) -> DocumentReport:
         """Analyze a single document and produce a structured forensic report.
+
+        What was retrieved for each chunk is left in `self.last_trace` for evaluation.
 
         Args:
             file_path: Path to the target document.
@@ -109,18 +130,16 @@ class ForensicPipeline:
         chunks = self.chunker.chunk_document(doc)
 
         chunk_findings = []
+        traces: list[ChunkTrace] = []
         # 3 & 4. Per-chunk retrieval and LLM analysis
         for chunk in chunks:
-            # Embed once and reuse the vector for both retrieval steps.
-            query_embedding = self.retriever.embed_chunk(chunk)
-            retrieved_attacks = self.retriever.retrieve_for_chunk(chunk, query_embedding)
-            retrieved_literature = self.retriever.retrieve_literature_for_chunk(
-                chunk, query_embedding
-            )
+            retrieved_attacks, retrieved_literature = self._retrieve(chunk)
+            traces.append(build_chunk_trace(chunk, retrieved_attacks, retrieved_literature))
             finding = self.analyst.analyze_chunk(
                 chunk, retrieved_attacks, retrieved_literature=retrieved_literature
             )
             chunk_findings.append(finding)
+        self.last_trace = traces
 
         # 5. Cross-chunk Aggregation & Deduplication
         aggregated_findings = self.aggregator.aggregate(chunk_findings, chunks)

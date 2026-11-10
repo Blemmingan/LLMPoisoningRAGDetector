@@ -1,196 +1,587 @@
-"""Evaluation metrics for forensic detector benchmark evaluation."""
+"""Evaluation metrics, following the RAG evaluation scheme of the course (class 11).
 
+The class splits RAG evaluation into the retriever and the generator, plus abilities,
+ranking and cost. Mapped to this system ("question" = the chunk under analysis,
+"context" = retrieved knowledge-base examples and literature passages, "answer" = the
+forensic finding, "ground truth" = the dataset label):
+
+Retriever (no LLM needed):
+- Context Precision@K: the class formula, sum_k(Precision@k * v_k) / relevant in top K,
+  with v_k = 1 when the k-th retrieved example has the labeled attack type.
+- Context Recall: share of the label's claims (attack type, and concealment technique
+  when there is one) that at least one retrieved example supports.
+- Ranking (class: MRR, NDCG): reciprocal rank of the first relevant example, NDCG@K.
+Generator:
+- Faithfulness: share of a finding's checkable claims that the context supports: the
+  quoted fragment is verbatim in the document (verifier), the cited example is one that
+  was actually retrieved, and the declared type matches the cited example's type.
+- Answer relevance: the class's reference-free version (questions generated from the
+  answer) fits free text; our answer is a labeled classification, so it is measured
+  against the ground truth: precision/recall/F1, macro-F1 by attack type, confusion
+  matrix and fragment coverage.
+Abilities: noise robustness = false positive rate on hard negatives; negative
+rejection = false positive rate on clean documents. Information integration does not
+apply (one document at a time).
+Cost: latency, tokens, calls and USD.
+
+Small slices get a 95% Wilson interval so differences are not over-read.
+"""
+
+import math
+from collections import Counter, defaultdict
+from statistics import mean, median
 from typing import Any
 
 from pydantic import BaseModel, Field
 
-from corpus_forensics.evaluation.dataset import EvalSample
-from corpus_forensics.schemas import CategoriaDocumento, DocumentReport
+from corpus_forensics.analysis.trace import ChunkTrace
+from corpus_forensics.evaluation.records import PredictionRecord
+from corpus_forensics.schemas import (
+    CategoriaDocumento,
+    DocumentReport,
+    Hallazgo,
+    TecnicaDeOcultamiento,
+)
+
+ATTACK_TYPES = (
+    "inyeccion_directa",
+    "jailbreak",
+    "exfiltracion",
+    "prompt_leaking",
+    "trigger_condicional",
+)
+CLEAN_LABEL = "limpio"
+# literature topic labels that count as relevant for each attack type
+TYPE_TO_LITERATURE_LABELS: dict[str, set[str]] = {
+    "inyeccion_directa": {"cubre_inyeccion", "cubre_indirecta"},
+    "jailbreak": {"cubre_jailbreak"},
+    "exfiltracion": {"cubre_exfiltracion"},
+    "prompt_leaking": {"cubre_prompt_leaking"},
+    "trigger_condicional": {"cubre_trigger"},
+}
+GRAM = 5  # character n-gram size used to compare fragments
+LOCATE_MIN_COVERAGE = 0.3  # below this, the attack is not considered found in any chunk
+FRAGMENT_MATCH_COVERAGE = 0.5
+SLICE_DIMENSIONS = (
+    "categoria",
+    "tipo_de_ataque",
+    "posicion",
+    "sutileza",
+    "tecnica_de_ocultamiento",
+    "formato",
+    "idioma_texto",
+    "fuente_ataque",
+)
+# class 11, slide 25: what to do given retriever and generator scores
+QUADRANT_ACTIONS = {
+    (True, True): "caso ideal",
+    (False, True): "revisar parámetros de indexado (retriever bajo)",
+    (True, False): "prompt engineering / parámetros del modelo (generador bajo)",
+    (False, False): "revisar la arquitectura y la base de conocimiento",
+}
 
 
 class EvaluationMetrics(BaseModel):
-    """Aggregate evaluation metrics report."""
+    """All evaluation results of one run."""
 
     total_samples: int
-    precision: float = Field(description="Precision for 'malicioso' classification")
-    recall: float = Field(description="Recall for 'malicioso' classification")
-    f1: float = Field(description="F1 score for 'malicioso' classification")
-    accuracy: float = Field(description="Accuracy for 'malicioso' classification")
-    fpr_hard_negatives: float = Field(
-        description="False positive rate on hard negative (security/academic) documents"
-    )
-    attack_type_accuracy: float = Field(
-        description="Accuracy in classifying tipo_de_ataque for true malicious cases"
-    )
-    concealment_technique_accuracy: float = Field(
-        description="Accuracy in classifying tecnica_de_ocultamiento"
-    )
-    fragment_match_rate: float = Field(
-        description="Rate at which predicted fragment overlaps ground truth fragment"
-    )
-    sliced_metrics: dict[str, Any] = Field(
-        default_factory=dict,
-        description="Metrics sliced by category, attack type, subtlety, or position",
-    )
+    config: dict[str, Any] = Field(default_factory=dict)
+    retriever: dict[str, Any] = Field(default_factory=dict)
+    generator: dict[str, Any] | None = None
+    abilities: dict[str, Any] | None = None
+    cost: dict[str, Any] = Field(default_factory=dict)
+    quadrants: list[dict[str, Any]] = Field(default_factory=list)
+    slices: dict[str, Any] = Field(default_factory=dict)
 
 
-def compute_classification_metrics(y_true: list[bool], y_pred: list[bool]) -> dict[str, float]:
-    """Compute binary classification precision, recall, F1, and accuracy."""
-    tp = sum(1 for yt, yp in zip(y_true, y_pred, strict=False) if yt and yp)
-    fp = sum(1 for yt, yp in zip(y_true, y_pred, strict=False) if not yt and yp)
-    fn = sum(1 for yt, yp in zip(y_true, y_pred, strict=False) if yt and not yp)
-    tn = sum(1 for yt, yp in zip(y_true, y_pred, strict=False) if not yt and not yp)
-    total = len(y_true)
+# --------------------------------------------------------------------------- helpers
 
-    precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
-    recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
-    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
-    acc = (tp + tn) / total if total > 0 else 0.0
 
+def wilson_interval(successes: int, n: int, z: float = 1.96) -> tuple[float, float]:
+    """95% Wilson score interval for a proportion."""
+    if n == 0:
+        return (0.0, 0.0)
+    p = successes / n
+    denom = 1 + z**2 / n
+    centre = (p + z**2 / (2 * n)) / denom
+    half = z * math.sqrt(p * (1 - p) / n + z**2 / (4 * n**2)) / denom
+    return (round(max(0.0, centre - half), 4), round(min(1.0, centre + half), 4))
+
+
+def proportion(successes: int, n: int) -> dict[str, Any]:
+    """A rate with its count and Wilson interval."""
+    return {
+        "valor": round(successes / n, 4) if n else None,
+        "n": n,
+        "ic95": list(wilson_interval(successes, n)),
+    }
+
+
+def _normalize(text: str) -> str:
+    return " ".join(text.lower().split())
+
+
+def _grams(text: str) -> set[str]:
+    text = _normalize(text)
+    if len(text) < GRAM:
+        return {text} if text else set()
+    return {text[i : i + GRAM] for i in range(len(text) - GRAM + 1)}
+
+
+def coverage(reference: str, candidate: str) -> float:
+    """Share of the reference's character 5-grams present in the candidate."""
+    norm_ref = _normalize(reference)
+    if len(norm_ref) < GRAM:  # too short for n-grams: plain containment
+        return 1.0 if norm_ref and norm_ref in _normalize(candidate) else 0.0
+    ref = _grams(norm_ref)
+    return len(ref & _grams(candidate)) / len(ref)
+
+
+def _avg(values: list[float]) -> float | None:
+    return round(mean(values), 4) if values else None
+
+
+def _f1(p: float, r: float) -> float:
+    return 2 * p * r / (p + r) if p + r else 0.0
+
+
+def auroc(positives: list[float], negatives: list[float]) -> float | None:
+    """Area under the ROC curve (probability a positive scores above a negative)."""
+    if not positives or not negatives:
+        return None
+    wins = sum(1.0 if p > n else 0.5 if p == n else 0.0 for p in positives for n in negatives)
+    return round(wins / (len(positives) * len(negatives)), 4)
+
+
+# --------------------------------------------------------------------------- retriever
+
+
+def context_precision(relevance: list[bool]) -> float:
+    """Class formula: sum_k (Precision@k * v_k) / number of relevant items in the top K."""
+    hits = 0
+    total = 0.0
+    for k, relevant in enumerate(relevance, start=1):
+        if relevant:
+            hits += 1
+            total += hits / k
+    return total / hits if hits else 0.0
+
+
+def reciprocal_rank(relevance: list[bool]) -> float:
+    return next((1 / k for k, rel in enumerate(relevance, start=1) if rel), 0.0)
+
+
+def ndcg(relevance: list[bool]) -> float:
+    """NDCG@K with binary relevance (the knowledge base has examples of every type)."""
+    dcg = sum(1 / math.log2(k + 1) for k, rel in enumerate(relevance, start=1) if rel)
+    ideal = sum(1 / math.log2(k + 1) for k in range(1, len(relevance) + 1))
+    return dcg / ideal if ideal else 0.0
+
+
+def locate_attack(traces: list[ChunkTrace], fragment: str) -> tuple[ChunkTrace | None, float]:
+    """The chunk that contains most of the attack, and how much of it."""
+    best: tuple[ChunkTrace | None, float] = (None, 0.0)
+    for trace in traces:
+        cov = coverage(fragment, trace.text)
+        if cov > best[1]:
+            best = (trace, cov)
+    return best if best[1] >= LOCATE_MIN_COVERAGE else (None, best[1])
+
+
+def retrieval_scores(record: PredictionRecord) -> dict[str, Any] | None:
+    """Retriever scores for the attacked chunk of a poisoned document."""
+    label = record.label
+    if not (label.malicioso and label.tipo_de_ataque and label.fragmento_exacto):
+        return None
+    chunk, cov = locate_attack(record.traces, label.fragmento_exacto)
+    if chunk is None or not chunk.examples:
+        return {"localizado": False, "cobertura_chunk": round(cov, 4)}
+    gt_type = label.tipo_de_ataque.value
+    relevance = [e.attack_type == gt_type for e in chunk.examples]
+    concealments = [
+        t.value for t in label.tecnica_de_ocultamiento if t != TecnicaDeOcultamiento.NINGUNA
+    ]
+    claims = [any(relevance)]
+    if concealments:
+        claims.append(any(e.concealment in concealments for e in chunk.examples))
+    scores: dict[str, Any] = {
+        "localizado": True,
+        "cobertura_chunk": round(cov, 4),
+        "k": len(relevance),
+        "context_precision": context_precision(relevance),
+        "context_recall": sum(claims) / len(claims),
+        "hit_at_1": float(relevance[0]),
+        "hit_at_k": float(any(relevance)),
+        "mrr": reciprocal_rank(relevance),
+        "ndcg": ndcg(relevance),
+        "similitud_top1": chunk.examples[0].similarity,
+    }
+    if chunk.passages:
+        wanted = TYPE_TO_LITERATURE_LABELS.get(gt_type, set())
+        lit_relevance = [bool(wanted & set(p.labels)) for p in chunk.passages]
+        scores["literatura_context_precision"] = context_precision(lit_relevance)
+        scores["literatura_hit_at_k"] = float(any(lit_relevance))
+    return scores
+
+
+def _doc_max_similarity(record: PredictionRecord) -> float | None:
+    sims = [t.examples[0].similarity for t in record.traces if t.examples]
+    return max(sims) if sims else None
+
+
+def chance_levels(kb_by_type: dict[str, int], k: int) -> dict[str, dict[str, float]]:
+    """Hit rates a random retriever would get, from the knowledge-base type shares.
+
+    With 77% of the examples being direct injection, retrieving that type is easy even at
+    random; scores are read against these levels.
+    """
+    total = sum(kb_by_type.values())
+    if not total:
+        return {}
+    return {
+        t: {
+            "azar_hit_at_1": round(n / total, 4),
+            "azar_hit_at_k": round(1 - (1 - n / total) ** k, 4),
+        }
+        for t, n in kb_by_type.items()
+    }
+
+
+def retriever_metrics(
+    records: list[PredictionRecord],
+    per_doc: dict[str, dict[str, Any]],
+    kb_by_type: dict[str, int] | None = None,
+) -> dict[str, Any]:
+    """Aggregate retriever metrics over poisoned documents, overall and by attack type."""
+    located = [s for s in per_doc.values() if s.get("localizado")]
+    keys = (
+        "context_precision",
+        "context_recall",
+        "hit_at_1",
+        "hit_at_k",
+        "mrr",
+        "ndcg",
+        "similitud_top1",
+        "literatura_context_precision",
+        "literatura_hit_at_k",
+    )
+
+    def summarize(items: list[dict[str, Any]]) -> dict[str, Any]:
+        return {key: _avg([s[key] for s in items if key in s]) for key in keys} | {"n": len(items)}
+
+    by_type: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for record in records:
+        scores = per_doc.get(record.documento)
+        if scores and scores.get("localizado") and record.label.tipo_de_ataque:
+            by_type[record.label.tipo_de_ataque.value].append(scores)
+
+    # how well the top-1 similarity alone separates poisoned from non-poisoned documents
+    poisoned = [s for r in records if r.label.malicioso if (s := _doc_max_similarity(r))]
+    hard = [
+        s
+        for r in records
+        if r.label.categoria == CategoriaDocumento.HARD_NEGATIVE
+        if (s := _doc_max_similarity(r))
+    ]
+    negatives = [s for r in records if not r.label.malicioso if (s := _doc_max_similarity(r))]
+    k_values = Counter(s["k"] for s in located)
+    k = k_values.most_common(1)[0][0] if k_values else None
+    chance = chance_levels(kb_by_type or {}, k or 1)
+    per_type = {
+        t: summarize(by_type[t]) | chance.get(t, {}) for t in ATTACK_TYPES if by_type.get(t)
+    }
+    return {
+        "k": k,
+        "envenenados": len(per_doc),
+        "ataque_localizado_en_un_chunk": len(located),
+        "global": summarize(located),
+        "por_tipo": per_type,
+        "linea_base_similitud": {
+            "descripcion": "AUROC de la similitud top-1 máxima del documento como único detector",
+            "auroc_vs_negativos": auroc(poisoned, negatives),
+            "auroc_vs_hard_negatives": auroc(poisoned, hard),
+        },
+    }
+
+
+# --------------------------------------------------------------------------- generator
+
+
+def _flagged(record: PredictionRecord) -> bool:
+    """Whether the pipeline flagged the document (False when there is no report)."""
+    return record.report is not None and record.report.malicioso
+
+
+def _findings(record: PredictionRecord) -> list[Hallazgo]:
+    return record.report.hallazgos if record.report is not None else []
+
+
+def _count(records: list[PredictionRecord]) -> int:
+    return len([r for r in records if _flagged(r)])
+
+
+def predicted_label(report: DocumentReport) -> str:
+    """'limpio', or the type of the most confident finding."""
+    if not report.malicioso or not report.hallazgos:
+        return CLEAN_LABEL
+    return max(report.hallazgos, key=lambda h: h.confianza).tipo_de_ataque.value
+
+
+def true_label(record: PredictionRecord) -> str:
+    label = record.label
+    if label.malicioso and label.tipo_de_ataque:
+        return label.tipo_de_ataque.value
+    return CLEAN_LABEL
+
+
+def classification_metrics(pairs: list[tuple[bool, bool]]) -> dict[str, Any]:
+    tp = sum(1 for t, p in pairs if t and p)
+    fp = sum(1 for t, p in pairs if not t and p)
+    fn = sum(1 for t, p in pairs if t and not p)
+    tn = sum(1 for t, p in pairs if not t and not p)
+    precision = tp / (tp + fp) if tp + fp else 0.0
+    recall = tp / (tp + fn) if tp + fn else 0.0
     return {
         "precision": round(precision, 4),
         "recall": round(recall, 4),
-        "f1": round(f1, 4),
-        "accuracy": round(acc, 4),
-        "tp": float(tp),
-        "fp": float(fp),
-        "fn": float(fn),
-        "tn": float(tn),
+        "f1": round(_f1(precision, recall), 4),
+        "accuracy": round((tp + tn) / len(pairs), 4) if pairs else 0.0,
+        "tp": tp,
+        "fp": fp,
+        "fn": fn,
+        "tn": tn,
     }
 
 
-def compute_hard_negative_fpr(
-    samples: list[EvalSample], predictions: list[DocumentReport]
-) -> float:
-    """Calculate False Positive Rate specifically on hard negative documents."""
-    hard_negatives = [
-        (s, p)
-        for s, p in zip(samples, predictions, strict=False)
-        if s.label.categoria == CategoriaDocumento.HARD_NEGATIVE
+def per_type_metrics(labels: list[tuple[str, str]]) -> dict[str, Any]:
+    """One-vs-rest precision/recall/F1 per attack type over all documents, and macro-F1."""
+    out: dict[str, Any] = {}
+    present = [t for t in ATTACK_TYPES if any(gt == t for gt, _ in labels)]
+    for attack_type in present:
+        tp = sum(1 for gt, pr in labels if gt == attack_type and pr == attack_type)
+        fp = sum(1 for gt, pr in labels if gt != attack_type and pr == attack_type)
+        fn = sum(1 for gt, pr in labels if gt == attack_type and pr != attack_type)
+        p = tp / (tp + fp) if tp + fp else 0.0
+        r = tp / (tp + fn) if tp + fn else 0.0
+        out[attack_type] = {
+            "precision": round(p, 4),
+            "recall": round(r, 4),
+            "f1": round(_f1(p, r), 4),
+            "n": tp + fn,
+        }
+    confusion: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    for gt, pr in labels:
+        confusion[gt][pr] += 1
+    return {
+        "macro_f1": _avg([m["f1"] for m in out.values()]),
+        "por_tipo": out,
+        "matriz_confusion": {gt: dict(row) for gt, row in confusion.items()},
+    }
+
+
+def faithfulness_claims(record: PredictionRecord) -> list[float]:
+    """Faithfulness score of each finding (supported claims / checkable claims)."""
+    if record.report is None:
+        return []
+    traces = {t.index: t for t in record.traces}
+    scores: list[float] = []
+    for finding in record.report.hallazgos:
+        claims = [finding.verificado]
+        if finding.ataque_similar_id:
+            trace = traces.get(finding.indice_chunk)
+            cited = next(
+                (e for e in (trace.examples if trace else []) if e.id == finding.ataque_similar_id),
+                None,
+            )
+            claims.append(cited is not None)
+            claims.append(cited is not None and cited.attack_type == finding.tipo_de_ataque.value)
+        scores.append(sum(claims) / len(claims))
+    return scores
+
+
+def fragment_scores(record: PredictionRecord) -> tuple[float, float] | None:
+    """(coverage of the true fragment, precision of the predicted one) for the best finding."""
+    if record.report is None or not record.label.fragmento_exacto:
+        return None
+    gt = record.label.fragmento_exacto
+    best = (0.0, 0.0)
+    for finding in record.report.hallazgos:
+        pair = (coverage(gt, finding.fragmento_exacto), coverage(finding.fragmento_exacto, gt))
+        best = max(best, pair)
+    return best
+
+
+def generator_metrics(records: list[PredictionRecord]) -> dict[str, Any]:
+    analyzed = [r for r in records if r.report is not None]
+    reports = [(r, r.report) for r in records if r.report is not None]
+    detection = classification_metrics([(r.label.malicioso, rep.malicioso) for r, rep in reports])
+    types = per_type_metrics([(true_label(r), predicted_label(rep)) for r, rep in reports])
+
+    poisoned = [r for r in analyzed if r.label.malicioso and r.label.tipo_de_ataque]
+    any_type = len(
+        [
+            r
+            for r in poisoned
+            if any(h.tipo_de_ataque == r.label.tipo_de_ataque for h in _findings(r))
+        ]
+    )
+    concealed = [
+        r
+        for r in poisoned
+        if any(t != TecnicaDeOcultamiento.NINGUNA for t in r.label.tecnica_de_ocultamiento)
     ]
-    if not hard_negatives:
-        return 0.0
-
-    false_positives = sum(1 for s, p in hard_negatives if p.malicioso)
-    return round(false_positives / len(hard_negatives), 4)
-
-
-def compute_attack_type_accuracy(
-    samples: list[EvalSample], predictions: list[DocumentReport]
-) -> float:
-    """Calculate accuracy of tipo_de_ataque identification for true positive samples."""
-    evaluable = [
-        (s, p)
-        for s, p in zip(samples, predictions, strict=False)
-        if s.label.malicioso and s.label.tipo_de_ataque is not None
-    ]
-    if not evaluable:
-        return 0.0
-
-    correct = 0
-    for s, p in evaluable:
-        gt_type = s.label.tipo_de_ataque
-        # Check if any finding emitted by model matched the ground truth attack type
-        if any(h.tipo_de_ataque == gt_type for h in p.hallazgos):
-            correct += 1
-
-    return round(correct / len(evaluable), 4)
+    concealment_hits = len(
+        [
+            r
+            for r in concealed
+            if set(r.label.tecnica_de_ocultamiento)
+            & {t for h in _findings(r) for t in h.tecnica_de_ocultamiento}
+        ]
+    )
+    fragments = [s for r in poisoned if (s := fragment_scores(r)) is not None]
+    faith = [s for r in analyzed for s in faithfulness_claims(r)]
+    return {
+        "deteccion": detection,
+        "tipos": types,
+        "tipo_en_algun_hallazgo": proportion(any_type, len(poisoned)),
+        "ocultamiento_identificado": proportion(concealment_hits, len(concealed)),
+        "fragmento": {
+            "coincidencia": proportion(
+                len([c for c, _ in fragments if c >= FRAGMENT_MATCH_COVERAGE]), len(fragments)
+            ),
+            "cobertura_media": _avg([c for c, _ in fragments]),
+            "precision_media": _avg([p for _, p in fragments]),
+            "umbral_cobertura": FRAGMENT_MATCH_COVERAGE,
+        },
+        "faithfulness": {"media": _avg(faith), "hallazgos": len(faith)},
+    }
 
 
-def compute_concealment_accuracy(
-    samples: list[EvalSample], predictions: list[DocumentReport]
-) -> float:
-    """Calculate accuracy of tecnica_de_ocultamiento identification."""
-    evaluable = [
-        (s, p)
-        for s, p in zip(samples, predictions, strict=False)
-        if s.label.malicioso and s.label.tecnica_de_ocultamiento
-    ]
-    if not evaluable:
-        return 0.0
+def ability_metrics(records: list[PredictionRecord]) -> dict[str, Any]:
+    analyzed = [r for r in records if r.report is not None]
 
-    correct = 0
-    for s, p in evaluable:
-        gt_techniques = set(s.label.tecnica_de_ocultamiento)
-        pred_techniques = {t for h in p.hallazgos for t in h.tecnica_de_ocultamiento}
-        # Overlap match
-        if gt_techniques & pred_techniques:
-            correct += 1
+    def fpr(category: CategoriaDocumento) -> dict[str, Any]:
+        docs = [r for r in analyzed if r.label.categoria == category]
+        return proportion(_count(docs), len(docs))
 
-    return round(correct / len(evaluable), 4)
+    return {
+        "noise_robustness_fpr_hard_negatives": fpr(CategoriaDocumento.HARD_NEGATIVE),
+        "negative_rejection_fpr_limpios": fpr(CategoriaDocumento.LIMPIO),
+    }
 
 
-def compute_fragment_match_rate(
-    samples: list[EvalSample], predictions: list[DocumentReport]
-) -> float:
-    """Calculate rate at which predicted verbatim fragment overlaps ground truth fragment."""
-    evaluable = [
-        (s, p)
-        for s, p in zip(samples, predictions, strict=False)
-        if s.label.malicioso and s.label.fragmento_exacto
-    ]
-    if not evaluable:
-        return 0.0
+# --------------------------------------------------------------------------- cost, slices
 
-    matches = 0
-    for s, p in evaluable:
-        if not s.label.fragmento_exacto:
+
+def cost_metrics(records: list[PredictionRecord]) -> dict[str, Any]:
+    latencies = sorted(r.latency_s for r in records)
+    p95 = (
+        latencies[min(len(latencies) - 1, math.ceil(0.95 * len(latencies)) - 1)]
+        if latencies
+        else 0.0
+    )
+    reports = [r.report for r in records if r.report is not None]
+    return {
+        "latencia_s": {
+            "mediana": round(median(latencies), 3) if latencies else None,
+            "p95": round(p95, 3),
+            "total": round(sum(latencies), 1),
+        },
+        "chunks": sum(len(r.traces) for r in records),
+        "chunks_fallidos": sum(rep.metadata_de_analisis.n_chunks_failed for rep in reports),
+        "llamadas": sum(r.usage.calls for r in records),
+        "llamadas_en_cache": sum(r.usage.cached_calls for r in records),
+        "tokens_prompt": sum(r.usage.prompt_tokens for r in records),
+        "tokens_completion": sum(r.usage.completion_tokens for r in records),
+        "costo_usd": round(sum(r.usage.cost_usd for r in records), 4),
+        "costo_usd_por_documento": round(sum(r.usage.cost_usd for r in records) / len(records), 5)
+        if records
+        else 0.0,
+    }
+
+
+def slice_value(record: PredictionRecord, dimension: str) -> list[str]:
+    label = record.label
+    if dimension == "tecnica_de_ocultamiento":
+        return [t.value for t in label.tecnica_de_ocultamiento] if label.malicioso else []
+    raw = getattr(label, dimension, None) if dimension in type(label).model_fields else None
+    if raw is None:
+        raw = label.extra.get(dimension)
+    if raw is None:
+        return []
+    value = getattr(raw, "value", raw)
+    if dimension == "fuente_ataque":
+        value = str(value).split(":")[0]
+    return [str(value)]
+
+
+def slice_metrics(
+    records: list[PredictionRecord], per_doc: dict[str, dict[str, Any]]
+) -> dict[str, Any]:
+    """Per-slice counts: retriever scores, detection recall on poisoned documents and
+    false positive rate on the rest, each with its Wilson interval."""
+    out: dict[str, Any] = {}
+    for dimension in SLICE_DIMENSIONS:
+        groups: dict[str, list[PredictionRecord]] = defaultdict(list)
+        for record in records:
+            for value in slice_value(record, dimension):
+                groups[value].append(record)
+        if not groups:
             continue
-        gt_frag = s.label.fragmento_exacto.strip().lower()
-        matched = False
-        for h in p.hallazgos:
-            pred_frag = h.fragmento_exacto.strip().lower()
-            if gt_frag in pred_frag or pred_frag in gt_frag:
-                matched = True
-                break
-        if matched:
-            matches += 1
+        table: dict[str, Any] = {}
+        for value, group in sorted(groups.items()):
+            positives = [r for r in group if r.label.malicioso]
+            negatives = [r for r in group if not r.label.malicioso]
+            row: dict[str, Any] = {"n": len(group)}
+            located = [
+                per_doc[r.documento]
+                for r in positives
+                if per_doc.get(r.documento, {}).get("localizado")
+            ]
+            if located:
+                row["context_precision"] = _avg([s["context_precision"] for s in located])
+                row["hit_at_1"] = _avg([s["hit_at_1"] for s in located])
+            pos_an = [r for r in positives if r.report is not None]
+            neg_an = [r for r in negatives if r.report is not None]
+            if pos_an:
+                row["recall"] = proportion(_count(pos_an), len(pos_an))
+            if neg_an:
+                row["fpr"] = proportion(_count(neg_an), len(neg_an))
+            table[value] = row
+        out[dimension] = table
+    return out
 
-    return round(matches / len(evaluable), 4)
+
+def quadrant_table(
+    retriever: dict[str, Any], generator: dict[str, Any] | None
+) -> list[dict[str, Any]]:
+    """Class 11 slide 25: each attack type placed by retriever and generator score."""
+    rows = []
+    for attack_type, scores in retriever.get("por_tipo", {}).items():
+        retr = scores.get("context_precision")
+        gen = (generator or {}).get("tipos", {}).get("por_tipo", {}).get(attack_type, {}).get("f1")
+        row: dict[str, Any] = {"tipo": attack_type, "retriever_cp": retr, "generador_f1": gen}
+        if retr is not None and gen is not None:
+            row["accion"] = QUADRANT_ACTIONS[(retr >= 0.5, gen >= 0.5)]
+        rows.append(row)
+    return rows
 
 
 def compute_all_metrics(
-    samples: list[EvalSample], predictions: list[DocumentReport]
+    records: list[PredictionRecord], config: dict[str, Any] | None = None
 ) -> EvaluationMetrics:
-    """Calculate overall evaluation metrics along with category/subtlety slices."""
-    y_true = [s.label.malicioso for s in samples]
-    y_pred = [p.malicioso for p in predictions]
-
-    cls_metrics = compute_classification_metrics(y_true, y_pred)
-    fpr_hn = compute_hard_negative_fpr(samples, predictions)
-    at_acc = compute_attack_type_accuracy(samples, predictions)
-    ct_acc = compute_concealment_accuracy(samples, predictions)
-    frag_match = compute_fragment_match_rate(samples, predictions)
-
-    # TODO(team): Complete detailed metric slicing:
-    # 1. Slice by 'categoria' (limpio vs envenenado vs hard_negative)
-    # 2. Slice by 'tipo_de_ataque' (inyeccion_directa, jailbreak, exfiltracion, etc.)
-    # 3. Slice by 'posicion' (inicio vs medio vs fin)
-    # 4. Slice by 'sutileza' (obvio vs parafraseado vs disfrazado)
-    sliced_metrics = {
-        "categoria": {
-            "limpio_count": sum(
-                1 for s in samples if s.label.categoria == CategoriaDocumento.LIMPIO
-            ),
-            "envenenado_count": sum(
-                1 for s in samples if s.label.categoria == CategoriaDocumento.ENVENENADO
-            ),
-            "hard_negative_count": sum(
-                1 for s in samples if s.label.categoria == CategoriaDocumento.HARD_NEGATIVE
-            ),
-        },
-        "slicing_stub": "TODO(team): Implement multi-dimensional slice breakdowns for benchmark reporting.",
-    }
-
+    """All metrics of a run. Generator and ability metrics need at least one report."""
+    per_doc = {r.documento: s for r in records if (s := retrieval_scores(r)) is not None}
+    retriever = retriever_metrics(records, per_doc, (config or {}).get("kb_por_tipo"))
+    has_reports = any(r.report is not None for r in records)
+    generator = generator_metrics(records) if has_reports else None
     return EvaluationMetrics(
-        total_samples=len(samples),
-        precision=cls_metrics["precision"],
-        recall=cls_metrics["recall"],
-        f1=cls_metrics["f1"],
-        accuracy=cls_metrics["accuracy"],
-        fpr_hard_negatives=fpr_hn,
-        attack_type_accuracy=at_acc,
-        concealment_technique_accuracy=ct_acc,
-        fragment_match_rate=frag_match,
-        sliced_metrics=sliced_metrics,
+        total_samples=len(records),
+        config=config or {},
+        retriever=retriever,
+        generator=generator,
+        abilities=ability_metrics(records) if has_reports else None,
+        cost=cost_metrics(records),
+        quadrants=quadrant_table(retriever, generator),
+        slices=slice_metrics(records, per_doc),
     )

@@ -263,11 +263,42 @@ triggers and no plain-text exfiltration, so those slices are small. The generate
 git-ignored; rebuild it with the command above.
 
 ### 5. Run Benchmark Evaluation
-Execute the evaluation harness across a labeled dataset:
 
 ```bash
-uv run corpus-forensics eval run --dataset data/eval/v1 --out reports/eval/
+# Retriever only: chunk + retrieve, no LLM calls, no cost
+uv run corpus-forensics eval run --dataset data/eval/v1 --out reports/eval-retrieval --retrieval-only
+# Full pipeline (LLM analysis per chunk)
+uv run corpus-forensics eval run --dataset data/eval/v1 --out reports/eval
+# Recompute metrics from a saved run without running the pipeline again (free)
+uv run corpus-forensics eval metrics --predictions reports/eval/predictions.jsonl
 ```
+
+Each run writes `predictions.jsonl` (label, report, what was retrieved per chunk, latency,
+usage), `run_config.json` (models, K, chunking, commit, dataset seed, knowledge-base type
+shares), `eval_summary.json` and `eval_summary.md`.
+
+The metrics follow the RAG evaluation scheme of the course (class 11), mapped to this
+system: *question* = the chunk under analysis, *context* = the retrieved knowledge-base
+examples and literature passages, *answer* = the forensic finding, *ground truth* = the
+dataset label. Everything is computed deterministically (no LLM judge).
+
+| Class metric | Here | Needs the LLM |
+|---|---|---|
+| Context Precision@K | Class formula; a retrieved example is relevant when it has the labeled attack type. Also for literature passages (topic labels). | No |
+| Context Recall | Share of the label's claims (attack type; concealment technique when there is one) supported by at least one retrieved example. | No |
+| Ranking (MRR, NDCG) | Reciprocal rank of the first relevant example; NDCG@K. | No |
+| Faithfulness | Share of a finding's checkable claims the context supports: fragment verbatim in the document, cited example actually retrieved, declared type equal to the cited example's. | Yes |
+| Answer relevance | Our answer is a labeled classification, so it is measured against the ground truth: precision / recall / F1, macro-F1 by attack type, confusion matrix, fragment coverage (≥ 50% of the true fragment's character 5-grams). | Yes |
+| Noise robustness / Negative rejection | False positive rate on hard negatives / on clean documents. | Yes |
+| Information integration | Not applicable (one document at a time). | — |
+| Cost | Latency (median, p95), chunks, calls, tokens, USD from the usage ledger. | — |
+
+Retriever scores are read against **chance levels** (what a random retriever would hit given
+each type's share of the knowledge base: 77% of the examples are direct injection). The
+report also includes a similarity-only baseline (AUROC of the document's top-1 similarity),
+the class's action matrix (retriever score × generator score per attack type) and slices by
+category, type, position, subtlety, concealment, format, language and attack source with
+95% Wilson intervals. When the LLM is the mock, the report says so at the top.
 
 ---
 

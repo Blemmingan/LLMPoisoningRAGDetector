@@ -367,41 +367,82 @@ def eval_run(
         typer.Option(
             "--dataset", "-d", help="Directory containing test documents and labels.jsonl."
         ),
-    ],
+    ] = Path("data/eval/v1"),
     out: Annotated[
         Path | None,
         typer.Option("--out", "-o", help="Output directory for evaluation results."),
     ] = None,
+    retrieval_only: Annotated[
+        bool,
+        typer.Option(
+            "--retrieval-only",
+            help="Only chunk and retrieve (no LLM calls, no cost): retriever metrics.",
+        ),
+    ] = False,
 ) -> None:
-    """Run benchmark evaluation over labeled dataset and output metrics summary."""
+    """Run the pipeline over a labeled dataset and write predictions and metrics."""
     rprint("[bold cyan]Running Forensic Benchmark Evaluation[/bold cyan]")
     rprint(f"Dataset path: [bold]{dataset}[/bold]\n")
-
-    harness = EvaluationHarness()
-    results = harness.run(dataset_dir=dataset, output_dir=out)
-
-    metrics = results["metrics"]
-    rprint(f"[green]✓ Evaluation completed over {results['total_evaluated']} samples![/green]\n")
-
-    # Metrics table
-    metrics_table = Table(title="Benchmark Performance Metrics")
-    metrics_table.add_column("Metric", style="cyan")
-    metrics_table.add_column("Value", justify="right", style="bold")
-
-    metrics_table.add_row("Precision (Malicioso)", f"{metrics.precision:.4f}")
-    metrics_table.add_row("Recall (Malicioso)", f"{metrics.recall:.4f}")
-    metrics_table.add_row("F1-Score", f"{metrics.f1:.4f}")
-    metrics_table.add_row("Accuracy", f"{metrics.accuracy:.4f}")
-    metrics_table.add_row("FPR on Hard Negatives", f"{metrics.fpr_hard_negatives:.4f}")
-    metrics_table.add_row("Attack Type Accuracy", f"{metrics.attack_type_accuracy:.4f}")
-    metrics_table.add_row(
-        "Concealment Tech Accuracy", f"{metrics.concealment_technique_accuracy:.4f}"
+    results = EvaluationHarness().run(
+        dataset_dir=dataset, output_dir=out, retrieval_only=retrieval_only
     )
-    metrics_table.add_row("Fragment Match Rate", f"{metrics.fragment_match_rate:.4f}")
+    rprint(f"[green]✓ Evaluation completed over {results['total_evaluated']} samples![/green]\n")
+    _print_metrics(results)
 
-    console.print(metrics_table)
-    rprint(f"\n[dim]Summary JSON written to: {results['json_summary']}[/dim]")
-    rprint(f"[dim]Summary Markdown written to: {results['markdown_summary']}[/dim]")
+
+@eval_app.command(name="metrics")
+def eval_metrics(
+    predictions: Annotated[
+        Path, typer.Option("--predictions", "-p", help="predictions.jsonl of an earlier run.")
+    ],
+    out: Annotated[
+        Path | None, typer.Option("--out", "-o", help="Output directory (default: same folder).")
+    ] = None,
+) -> None:
+    """Recompute metrics from saved predictions (no pipeline run, no cost)."""
+    from corpus_forensics.evaluation.harness import recompute
+
+    _print_metrics(recompute(predictions, out))
+
+
+def _print_metrics(results: dict[str, Any]) -> None:
+    metrics = results["metrics"]
+    table = Table(title="Evaluation metrics")
+    table.add_column("Metric", style="cyan")
+    table.add_column("Value", justify="right", style="bold")
+    retr = metrics.retriever
+    glob = retr.get("global", {})
+    k = retr.get("k")
+
+    def fmt(value: Any) -> str:
+        return "—" if value is None else f"{value:.3f}"
+
+    table.add_row(f"Retriever: Context Precision@{k}", fmt(glob.get("context_precision")))
+    table.add_row("Retriever: Context Recall", fmt(glob.get("context_recall")))
+    table.add_row("Retriever: MRR", fmt(glob.get("mrr")))
+    table.add_row(f"Retriever: NDCG@{k}", fmt(glob.get("ndcg")))
+    table.add_row("Retriever: Hit@1", fmt(glob.get("hit_at_1")))
+    if metrics.generator is not None:
+        gen = metrics.generator
+        table.add_row("Generator: F1 (malicioso)", fmt(gen["deteccion"]["f1"]))
+        table.add_row("Generator: macro-F1 by type", fmt(gen["tipos"]["macro_f1"]))
+        table.add_row("Generator: faithfulness", fmt(gen["faithfulness"]["media"]))
+        abil = metrics.abilities or {}
+        table.add_row(
+            "FPR hard negatives (noise robustness)",
+            fmt(abil.get("noise_robustness_fpr_hard_negatives", {}).get("valor")),
+        )
+        table.add_row(
+            "FPR clean (negative rejection)",
+            fmt(abil.get("negative_rejection_fpr_limpios", {}).get("valor")),
+        )
+    table.add_row("Cost (USD)", f"{metrics.cost['costo_usd']}")
+    console.print(table)
+    if metrics.config.get("llm_is_mock") and metrics.generator is not None:
+        rprint("[yellow]LLM is a mock: generator metrics do not measure the real system.[/yellow]")
+    rprint(f"\n[dim]Predictions: {results['predictions']}[/dim]")
+    rprint(f"[dim]Summary JSON: {results['json_summary']}[/dim]")
+    rprint(f"[dim]Summary Markdown: {results['markdown_summary']}[/dim]")
 
 
 # -----------------------------------------------------------------------------
