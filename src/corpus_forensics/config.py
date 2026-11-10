@@ -61,7 +61,8 @@ class Settings(BaseSettings):
     # Retrieval configuration
     top_k: int = Field(default=3, description="Number of nearest attack entries to retrieve")
     literature_top_k: int = Field(
-        default=2, description="Number of literature passages to retrieve for contextual grounding"
+        default=2,
+        description="Literature passages added to the analyst prompt (0 disables the step)",
     )
 
     # Provider configurations (default to mock implementations)

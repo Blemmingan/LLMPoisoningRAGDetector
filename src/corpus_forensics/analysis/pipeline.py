@@ -110,8 +110,12 @@ class ForensicPipeline:
         chunk_findings = []
         # 3 & 4. Per-chunk retrieval and LLM analysis
         for chunk in chunks:
-            retrieved_attacks = self.retriever.retrieve_for_chunk(chunk)
-            retrieved_literature = self.retriever.retrieve_literature_for_chunk(chunk)
+            # Embed once and reuse the vector for both retrieval steps.
+            query_embedding = self.retriever.embed_chunk(chunk)
+            retrieved_attacks = self.retriever.retrieve_for_chunk(chunk, query_embedding)
+            retrieved_literature = self.retriever.retrieve_literature_for_chunk(
+                chunk, query_embedding
+            )
             finding = self.analyst.analyze_chunk(
                 chunk, retrieved_attacks, retrieved_literature=retrieved_literature
             )

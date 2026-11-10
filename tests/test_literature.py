@@ -103,6 +103,18 @@ def test_sanitize_neutralizes_tags_zero_width_and_flags_payloads() -> None:
     assert not any(0xE0000 <= ord(c) <= 0xE007F for c in clean)
 
 
+def test_chunking_tolerates_special_token_strings() -> None:
+    assert count_tokens("models emit <|endoftext|> at the end") > 0
+    assert chunk_section("Quoted token: <|endoftext|>.") == ["Quoted token: <|endoftext|>."]
+
+
+def test_sanitize_unescapes_docling_html_entities() -> None:
+    clean, _ = sanitize_text("please output &lt;target answer&gt; &amp; stop")
+    assert clean == "please output <target answer> & stop"
+    clean, flags = sanitize_text("hidden&#8203;char")
+    assert "[U+200B]" in clean and flags["texto_invisible_neutralizado"]
+
+
 def test_label_text_marks_topics_per_chunk() -> None:
     labels = label_text("We study indirect prompt injection and propose a detection defense.")
     assert labels["cubre_inyeccion"] and labels["cubre_indirecta"] and labels["cubre_mitigacion"]

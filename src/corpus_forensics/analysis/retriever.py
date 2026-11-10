@@ -32,11 +32,20 @@ class AttackRetriever:
         self.literature_store = literature_store
         self.literature_top_k = literature_top_k
 
-    def retrieve_for_chunk(self, chunk: Chunk) -> list[RetrievedAttack]:
-        """Embed chunk text and query vector store for closest known attack examples.
+    def embed_chunk(self, chunk: Chunk) -> list[float] | None:
+        """Embed a chunk once so both retrieval steps can reuse the same vector."""
+        if not chunk.text.strip():
+            return None
+        return self.embedder.embed_query(chunk.text)
+
+    def retrieve_for_chunk(
+        self, chunk: Chunk, query_embedding: list[float] | None = None
+    ) -> list[RetrievedAttack]:
+        """Query the vector store for the known attack examples closest to a chunk.
 
         Args:
             chunk: Text chunk being analyzed.
+            query_embedding: Pre-computed chunk embedding (computed here if omitted).
 
         Returns:
             List of RetrievedAttack items.
@@ -44,26 +53,39 @@ class AttackRetriever:
         if not chunk.text.strip() or self.vector_store.count() == 0:
             return []
 
-        query_embedding = self.embedder.embed_query(chunk.text)
+        if query_embedding is None:
+            query_embedding = self.embedder.embed_query(chunk.text)
         return self.vector_store.query(query_embedding=query_embedding, top_k=self.top_k)
 
-    def retrieve_literature_for_chunk(self, chunk: Chunk) -> list[LiteraturePassage]:
-        """Embed chunk text and query literature store for relevant research passages.
+    def retrieve_literature_for_chunk(
+        self, chunk: Chunk, query_embedding: list[float] | None = None
+    ) -> list[LiteraturePassage]:
+        """Query the literature store for research passages relevant to a chunk.
+
+        Passages flagged `contiene_payload` (papers quoting literal attack strings) are
+        skipped: the knowledge base must not hand injection text to the analyst.
+        `literature_top_k <= 0` disables this step (e.g. for the ablation study).
 
         Args:
             chunk: Text chunk being analyzed.
+            query_embedding: Pre-computed chunk embedding (computed here if omitted).
 
         Returns:
-            List of LiteraturePassage items.
+            Up to `literature_top_k` LiteraturePassage items without literal payloads.
         """
         if (
-            not chunk.text.strip()
+            self.literature_top_k <= 0
+            or not chunk.text.strip()
             or self.literature_store is None
             or self.literature_store.count() == 0
         ):
             return []
 
-        query_embedding = self.embedder.embed_query(chunk.text)
-        return self.literature_store.query(
-            query_embedding=query_embedding, top_k=self.literature_top_k
+        if query_embedding is None:
+            query_embedding = self.embedder.embed_query(chunk.text)
+        # Over-fetch so that dropping payload passages still leaves enough results.
+        candidates = self.literature_store.query(
+            query_embedding=query_embedding, top_k=self.literature_top_k * 3 + 2
         )
+        safe = [p for p in candidates if not p.metadata.get("contiene_payload")]
+        return safe[: self.literature_top_k]

@@ -9,6 +9,7 @@ Only the source list is versioned. Downloads and processed chunks stay local bec
 repository is public and most of these works may be read but not redistributed.
 """
 
+import html
 import json
 import re
 import time
@@ -292,6 +293,9 @@ def sanitize_text(text: str) -> tuple[str, dict[str, bool]]:
     - Literal attack payloads quoted by papers are flagged in `contiene_payload`.
     """
     flags = {"texto_invisible_neutralizado": False, "contiene_payload": False}
+    # Docling escapes &, < and > in its markdown export. Unescape first, so that entities
+    # such as &#8203; cannot reintroduce invisible characters after neutralization.
+    text = html.unescape(text)
 
     def replace_tags(match: re.Match[str]) -> str:
         flags["texto_invisible_neutralizado"] = True
@@ -328,8 +332,14 @@ def _encoding() -> Any:
     return tiktoken.get_encoding("cl100k_base")
 
 
+def _encode(text: str) -> list[int]:
+    """Tokenize treating special-token strings (e.g. "<|endoftext|>", which papers quote)
+    as plain text instead of raising."""
+    return list(_encoding().encode(text, disallowed_special=()))
+
+
 def count_tokens(text: str) -> int:
-    return len(_encoding().encode(text))
+    return len(_encode(text))
 
 
 def split_sections(markdown: str, default_title: str) -> list[tuple[str, str]]:
@@ -357,7 +367,7 @@ def split_sections(markdown: str, default_title: str) -> list[tuple[str, str]]:
 
 
 def _split_long(paragraph: str, max_tokens: int) -> list[str]:
-    tokens = _encoding().encode(paragraph)
+    tokens = _encode(paragraph)
     return [
         _encoding().decode(tokens[i : i + max_tokens]) for i in range(0, len(tokens), max_tokens)
     ]
@@ -385,7 +395,7 @@ def chunk_section(text: str, target_tokens: int = 350, overlap_tokens: int = 50)
         n = count_tokens(para)
         if current and current_tokens + n > target_tokens:
             chunks.append("\n\n".join(current))
-            tail = _encoding().decode(_encoding().encode(chunks[-1])[-overlap_tokens:])
+            tail = _encoding().decode(_encode(chunks[-1])[-overlap_tokens:])
             current, current_tokens = ([tail], count_tokens(tail)) if overlap_tokens else ([], 0)
         current.append(para)
         current_tokens += n
@@ -404,7 +414,8 @@ def chunk_source(
     """Turn a source's markdown into sanitized, labeled, retrievable chunks."""
     chunks: list[LiteratureChunk] = []
     index = 0
-    for section, body in split_sections(markdown, default_title=source.titulo):
+    for raw_section, body in split_sections(markdown, default_title=source.titulo):
+        section = html.unescape(raw_section)
         for piece in chunk_section(body, target_tokens, overlap_tokens):
             text, flags = sanitize_text(piece)
             n_tokens = count_tokens(text)
