@@ -11,6 +11,7 @@ persisted into the vector database or knowledge base.
 from collections.abc import Sequence
 from pathlib import Path
 
+from corpus_forensics.analysis.advanced_retrieval import CrossEncoderReranker
 from corpus_forensics.analysis.aggregator import FindingAggregator
 from corpus_forensics.analysis.analyst import LLM_ERROR_PREFIX, ChunkAnalyst
 from corpus_forensics.analysis.prompt_builder import PromptBuilder, resolve_prompt_path
@@ -81,6 +82,14 @@ class ForensicPipeline:
             literature_store=self.literature_store,
             literature_top_k=self.settings.literature_top_k,
             use_normalized_text=self.settings.normalize_for_retrieval,
+            query_rewrite=self.settings.query_rewrite,
+            query_rewrite_max_sentences=self.settings.query_rewrite_max_sentences,
+            hybrid_search=self.settings.hybrid_search,
+            rrf_k=self.settings.rrf_k,
+            reranker=CrossEncoderReranker(self.settings.rerank_model)
+            if self.settings.rerank
+            else None,
+            rerank_candidates=self.settings.rerank_candidates,
         )
 
         self.prompt_builder = PromptBuilder(

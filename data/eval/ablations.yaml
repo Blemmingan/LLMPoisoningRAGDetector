@@ -48,3 +48,37 @@ variants:
     requires_llm: true
     overrides:
       analyst_prompt: analyst_prompt_sin_hard_negatives
+
+  # ---- Advanced RAG without LLM (knowledge base of known attacks only) ----
+  - name: rerank
+    description: Reranking de 20 candidatos con un cross-encoder multilingüe local (técnica principal)
+    question: ¿El reranker sube el ejemplo del tipo correcto al top-3?
+    overrides:
+      rerank: true
+
+  - name: hibrido
+    description: Búsqueda híbrida BM25 + embeddings fusionada con Reciprocal Rank Fusion
+    question: ¿Las palabras literales de los ataques mejoran la búsqueda?
+    overrides:
+      hybrid_search: true
+
+  - name: reescritura
+    description: Busca con las oraciones más sospechosas del chunk (reescritura determinística)
+    question: ¿Enfocar la consulta reduce la dilución del ataque en el texto benigno?
+    overrides:
+      query_rewrite: true
+
+  - name: rag_avanzado
+    description: Reescritura + búsqueda híbrida + reranking
+    question: ¿Las tres técnicas juntas superan a cada una por separado?
+    overrides:
+      query_rewrite: true
+      hybrid_search: true
+      rerank: true
+
+  - name: hibrido_reescritura
+    description: Reescritura + búsqueda híbrida, sin reranker
+    question: ¿Las dos técnicas baratas juntas alcanzan sin el costo del reranker?
+    overrides:
+      query_rewrite: true
+      hybrid_search: true

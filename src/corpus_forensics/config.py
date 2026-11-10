@@ -95,6 +95,26 @@ class Settings(BaseSettings):
         description="Minimum finding severity that counts: 'baja', 'media', 'alta' or 'critica'",
     )
 
+    # Advanced retrieval of known attacks (no LLM): rewriting -> hybrid -> reranking
+    query_rewrite: bool = Field(
+        default=False, description="Search with the most suspicious sentences of the chunk"
+    )
+    query_rewrite_max_sentences: int = Field(
+        default=3, description="Suspicious sentences searched separately per chunk"
+    )
+    hybrid_search: bool = Field(
+        default=False, description="Fuse BM25 with the embedding search (Reciprocal Rank Fusion)"
+    )
+    rrf_k: int = Field(default=60, description="Reciprocal Rank Fusion constant")
+    rerank: bool = Field(default=False, description="Rerank candidates with a cross-encoder")
+    rerank_model: str = Field(
+        default="cross-encoder/mmarco-mMiniLMv2-L12-H384-v1",
+        description="Cross-encoder model name or local path",
+    )
+    rerank_candidates: int = Field(
+        default=20, description="Candidate pool reranked (or fused) before keeping top_k"
+    )
+
     # Provider configurations (default to mock implementations)
     llm_provider: str = Field(default="mock", description="LLM provider name: 'mock', etc.")
     embedder_provider: str = Field(

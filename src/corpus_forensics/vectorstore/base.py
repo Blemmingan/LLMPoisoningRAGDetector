@@ -60,3 +60,11 @@ class VectorStore(ABC):
     def get_stats(self) -> dict[str, Any]:
         """Return summary statistics (e.g. entry counts by source, attack type)."""
         pass
+
+    def get_all(self) -> list[RetrievedAttack]:
+        """Every entry (similarity 0). Needed by the lexical (BM25) index."""
+        raise NotImplementedError(f"{type(self).__name__} does not support get_all")
+
+    def get_embeddings(self, ids: list[str]) -> dict[str, list[float]]:
+        """Stored embeddings by entry id."""
+        raise NotImplementedError(f"{type(self).__name__} does not support get_embeddings")

@@ -327,10 +327,43 @@ uv run corpus-forensics eval ablation --out reports/ablation
 | `sin_literatura` | No literature retrieval (`literature_top_k=0`) | Does the literature help the analyst? |
 | `sin_verificador` | No confidence penalty, verified fragment not required | How much precision does the anti-hallucination check add? |
 | `prompt_sin_hard_negatives` | Prompt without the hard-negative policy and examples | Do the examples lower false positives on texts about attacks? |
+| `rerank` | Cross-encoder reranking of 20 candidates (main Advanced RAG technique) | Does the reranker lift the right-type example into the top 3? |
+| `hibrido` | BM25 + embeddings fused with Reciprocal Rank Fusion | Do the attacks' literal markers improve the search? |
+| `reescritura` | Search with the chunk's most suspicious sentences | Does focusing the query reduce dilution in benign text? |
+| `hibrido_reescritura` | Rewriting + hybrid, no reranker | Do the two cheap techniques suffice? |
+| `rag_avanzado` | Rewriting + hybrid + reranking | Do the three together beat each alone? |
 
 Folders that already have results are skipped (`--force` re-runs them), so a paid run is never
 repeated; `--summary-only` rebuilds the table. Variants marked `requires_llm` are skipped with
 `--retrieval-only`, since their retrieval equals the base.
+
+**Advanced RAG without an LLM** (knowledge base of known attacks only; each technique has its
+own switch, all off by default):
+
+- `CF_QUERY_REWRITE`: split the chunk into sentences, score them with the labeling patterns
+  (instruction override, prompt leaking, role play, exfiltration, triggers, conditionals) plus
+  URLs, base64 and second-person address, and search the most suspicious ones separately
+  (`CF_QUERY_REWRITE_MAX_SENTENCES`, default 3). It only focuses the search; with no suspicious
+  sentence the whole chunk is searched.
+- `CF_HYBRID_SEARCH`: BM25 over the knowledge-base texts next to the embedding search, fused
+  with Reciprocal Rank Fusion (`CF_RRF_K`, default 60).
+- `CF_RERANK`: a multilingual cross-encoder (`CF_RERANK_MODEL`, default
+  `cross-encoder/mmarco-mMiniLMv2-L12-H384-v1`, ~470 MB, downloaded on first use) reorders a pool
+  of `CF_RERANK_CANDIDATES` (20) candidates; pairs are capped at 256 tokens.
+
+Final examples keep the cosine similarity to the whole chunk, so scores stay comparable across
+configurations. First retriever results (190 documents, K = 3):
+
+| Variant | Context Precision | Hit@1 | prompt leaking CP | trigger CP | Median latency / doc |
+|---|---|---|---|---|---|
+| base | 0.603 | 0.54 | 0.12 | 0.00 | 0.13 s |
+| rerank | 0.557 | 0.48 | 0.17 | 0.03 | 4.2 s |
+| hibrido | 0.652 | 0.58 | 0.12 | 0.28 | 0.14 s |
+| reescritura | 0.578 | 0.51 | 0.47 | 0.00 | 0.15 s |
+| hibrido_reescritura | 0.679 | 0.61 | 0.47 | 0.00 | 0.19 s |
+| rag_avanzado | **0.700** | **0.65** | **0.58** | **0.30** | 4.2 s |
+
+Latencies were measured on a 4-vCPU Linux VM; reranking is much faster natively.
 
 Retriever scores are read against **chance levels** (what a random retriever would hit given
 each type's share of the knowledge base: 77% of the examples are direct injection). The

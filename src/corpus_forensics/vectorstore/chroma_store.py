@@ -12,6 +12,31 @@ from corpus_forensics.vectorstore.base import VectorStore
 DEFAULT_COLLECTION_NAME = "known_attacks"
 
 
+def _to_attack(
+    entry_id: str, doc_text: str, meta: dict[str, Any], similarity: float
+) -> RetrievedAttack:
+    """Build a RetrievedAttack from a stored entry."""
+    try:
+        attack_type = TipoDeAtaque(str(meta.get("attack_type", "otro")))
+    except ValueError:
+        attack_type = TipoDeAtaque.OTRO
+    try:
+        concealment = TecnicaDeOcultamiento(str(meta.get("concealment_technique", "ninguna")))
+    except ValueError:
+        concealment = TecnicaDeOcultamiento.NINGUNA
+    return RetrievedAttack(
+        attack_id=entry_id,
+        text=doc_text,
+        source=str(meta.get("source", "unknown")),
+        attack_type=attack_type,
+        concealment_technique=concealment,
+        attacker_objective=str(meta.get("attacker_objective", "unknown")),
+        mitigation=str(meta.get("mitigation", "")),
+        similarity_score=round(max(0.0, min(1.0, similarity)), 4),
+        metadata=dict(meta),
+    )
+
+
 class ChromaVectorStore(VectorStore):
     """Local, persistent ChromaDB vector store for known attack payloads.
 
@@ -118,33 +143,32 @@ class ChromaVectorStore(VectorStore):
             # In Chroma hnsw:space cosine, distance = 1 - cosine_similarity
             similarity = max(0.0, min(1.0, 1.0 - dist))
 
-            attack_type_str = str(meta.get("attack_type", "otro"))
-            try:
-                attack_type = TipoDeAtaque(attack_type_str)
-            except ValueError:
-                attack_type = TipoDeAtaque.OTRO
-
-            concealment_str = str(meta.get("concealment_technique", "ninguna"))
-            try:
-                concealment = TecnicaDeOcultamiento(concealment_str)
-            except ValueError:
-                concealment = TecnicaDeOcultamiento.NINGUNA
-
-            retrieved.append(
-                RetrievedAttack(
-                    attack_id=entry_id,
-                    text=doc_text,
-                    source=str(meta.get("source", "unknown")),
-                    attack_type=attack_type,
-                    concealment_technique=concealment,
-                    attacker_objective=str(meta.get("attacker_objective", "unknown")),
-                    mitigation=str(meta.get("mitigation", "")),
-                    similarity_score=round(similarity, 4),
-                    metadata=dict(meta),
-                )
-            )
+            retrieved.append(_to_attack(entry_id, doc_text, meta, similarity))
 
         return retrieved
+
+    def get_all(self) -> list[RetrievedAttack]:
+        """Every stored entry (similarity 0), for the lexical index."""
+        data = self._collection.get(include=["documents", "metadatas"])
+        docs = data.get("documents") or []
+        metas = data.get("metadatas") or []
+        return [
+            _to_attack(entry_id, str(docs[i] or ""), dict(metas[i] or {}), 0.0)
+            for i, entry_id in enumerate(data.get("ids") or [])
+        ]
+
+    def get_embeddings(self, ids: list[str]) -> dict[str, list[float]]:
+        """Stored embeddings by entry id."""
+        if not ids:
+            return {}
+        data = self._collection.get(ids=ids, include=["embeddings"])
+        embeddings = data.get("embeddings")
+        if embeddings is None:
+            return {}
+        return {
+            entry_id: [float(x) for x in embeddings[i]]
+            for i, entry_id in enumerate(data.get("ids") or [])
+        }
 
     def count(self) -> int:
         """Return total entries in collection."""

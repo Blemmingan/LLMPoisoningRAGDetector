@@ -20,6 +20,8 @@ from corpus_forensics.evaluation.report import render_markdown
 from corpus_forensics.llm.usage import UsageRecord
 
 PREDICTIONS_FILE = "predictions.jsonl"
+PARTIAL_FILE = "predictions.partial.jsonl"
+PARTIAL_CONFIG_FILE = "run_config.partial.json"
 
 
 def _ledger_records(path: Path, skip: int) -> list[UsageRecord]:
@@ -94,6 +96,11 @@ def run_config(
         "chunk_overlap": settings.chunk_overlap,
         "chunk_unit": settings.chunk_unit,
         "normalize_for_retrieval": settings.normalize_for_retrieval,
+        "query_rewrite": settings.query_rewrite,
+        "hybrid_search": settings.hybrid_search,
+        "rerank": settings.rerank,
+        "rerank_model": settings.rerank_model if settings.rerank else None,
+        "rerank_candidates": settings.rerank_candidates,
         "analyst_prompt": settings.analyst_prompt,
         "verifier_penalize": settings.verifier_penalize,
         "verdict_threshold": settings.verdict_threshold,
@@ -132,9 +139,15 @@ class EvaluationHarness:
         if not samples:
             raise ValueError(f"No evaluation samples loaded from {dataset_dir}")
 
+        config = run_config(settings, self.pipeline, dataset_path, retrieval_only)
+        config.update(extra_config or {})
+        done = self._resume(out_path, config)
+
         ledger = settings.usage_ledger_path
-        records: list[PredictionRecord] = []
+        partial = out_path / PARTIAL_FILE
         for sample in samples:
+            if sample.label.documento in done:
+                continue
             before = _ledger_size(ledger)
             start = time.perf_counter()
             if retrieval_only:
@@ -143,20 +156,47 @@ class EvaluationHarness:
             else:
                 report = self.pipeline.analyze_document(sample.file_path)
                 traces = self.pipeline.last_trace
-            records.append(
-                PredictionRecord(
-                    documento=sample.label.documento,
-                    label=sample.label,
-                    report=report,
-                    traces=traces,
-                    latency_s=round(time.perf_counter() - start, 4),
-                    usage=_usage_delta(_ledger_records(ledger, before)),
-                )
+            record = PredictionRecord(
+                documento=sample.label.documento,
+                label=sample.label,
+                report=report,
+                traces=traces,
+                latency_s=round(time.perf_counter() - start, 4),
+                usage=_usage_delta(_ledger_records(ledger, before)),
             )
+            # appended as soon as it is ready: an interrupted run resumes from here
+            with open(partial, "a", encoding="utf-8") as f:
+                f.write(record.model_dump_json() + "\n")
+            done[record.documento] = record
 
-        config = run_config(settings, self.pipeline, dataset_path, retrieval_only)
-        config.update(extra_config or {})
-        return write_outputs(records, config, out_path)
+        records = [done[s.label.documento] for s in samples]
+        result = write_outputs(records, config, out_path)
+        partial.unlink(missing_ok=True)
+        (out_path / PARTIAL_CONFIG_FILE).unlink(missing_ok=True)
+        return result
+
+    @staticmethod
+    def _resume(out_path: Path, config: dict[str, Any]) -> dict[str, PredictionRecord]:
+        """Records of an interrupted run with the same configuration (empty otherwise)."""
+        out_path.mkdir(parents=True, exist_ok=True)
+        partial = out_path / PARTIAL_FILE
+        config_path = out_path / PARTIAL_CONFIG_FILE
+        comparable = json.loads(
+            json.dumps({k: v for k, v in config.items() if k != "commit"}, default=str)
+        )
+        if partial.exists() and config_path.exists():
+            previous = json.loads(config_path.read_text(encoding="utf-8"))
+            if previous != comparable:
+                raise ValueError(
+                    f"{partial} belongs to a run with another configuration; "
+                    "delete it or use another output folder."
+                )
+            return {r.documento: r for r in read_records(partial)}
+        partial.unlink(missing_ok=True)
+        config_path.write_text(
+            json.dumps(comparable, indent=2, ensure_ascii=False), encoding="utf-8"
+        )
+        return {}
 
 
 def write_outputs(
