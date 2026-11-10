@@ -1,0 +1,222 @@
+# Pinned sources for the evaluation dataset (corpus-forensics eval build).
+#
+# Wikipedia pages are fetched at a fixed revision (revid) and READMEs at a fixed commit, so
+# every teammate rebuilds exactly the same documents. Texts are CC BY-SA 4.0 (Wikipedia) or
+# under each repository's license; attacks come from the held-out splits of deepset, BIPIA
+# and HackAPrompt (never from what is loaded in the knowledge base).
+# role: limpio = clean base text; hard_negative = text that discusses attacks without being one.
+# Pinned on 2026-11-10.
+wikipedia:
+- lang: en
+  title: Andes
+  revid: 1384202523
+  role: limpio
+- lang: en
+  title: Bicycle
+  revid: 1375091239
+  role: limpio
+- lang: en
+  title: Buenos Aires
+  revid: 1384670905
+  role: limpio
+- lang: en
+  title: Chess
+  revid: 1384616189
+  role: limpio
+- lang: en
+  title: Coffee
+  revid: 1383558097
+  role: limpio
+- lang: en
+  title: Great Barrier Reef
+  revid: 1381928932
+  role: limpio
+- lang: en
+  title: Jupiter
+  revid: 1384572050
+  role: limpio
+- lang: en
+  title: Lighthouse
+  revid: 1384577287
+  role: limpio
+- lang: en
+  title: Marathon
+  revid: 1384623796
+  role: limpio
+- lang: en
+  title: Olive oil
+  revid: 1383649933
+  role: limpio
+- lang: en
+  title: Origami
+  revid: 1384702249
+  role: limpio
+- lang: en
+  title: Penguin
+  revid: 1381034472
+  role: limpio
+- lang: en
+  title: Photosynthesis
+  revid: 1383248806
+  role: limpio
+- lang: en
+  title: Solar eclipse
+  revid: 1383567264
+  role: limpio
+- lang: en
+  title: Sourdough
+  revid: 1382803423
+  role: limpio
+- lang: en
+  title: Tango
+  revid: 1381396633
+  role: limpio
+- lang: en
+  title: Volcano
+  revid: 1383463954
+  role: limpio
+- lang: en
+  title: Western honey bee
+  revid: 1378342627
+  role: limpio
+- lang: es
+  title: Ajedrez
+  revid: 175724719
+  role: limpio
+- lang: es
+  title: Apis mellifera
+  revid: 173345803
+  role: limpio
+- lang: es
+  title: Asado
+  revid: 175630997
+  role: limpio
+- lang: es
+  title: Café
+  revid: 176227273
+  role: limpio
+- lang: es
+  title: Cataratas del Iguazú
+  revid: 175199576
+  role: limpio
+- lang: es
+  title: Dulce de leche
+  revid: 176068302
+  role: limpio
+- lang: es
+  title: Eclipse solar
+  revid: 175907588
+  role: limpio
+- lang: es
+  title: Empanada
+  revid: 176204597
+  role: limpio
+- lang: es
+  title: Fotosíntesis
+  revid: 176120472
+  role: limpio
+- lang: es
+  title: Fútbol
+  revid: 174661370
+  role: limpio
+- lang: es
+  title: Glaciar Perito Moreno
+  revid: 175815721
+  role: limpio
+- lang: es
+  title: Jorge Luis Borges
+  revid: 176096210
+  role: limpio
+- lang: es
+  title: Mate (infusión)
+  revid: 176023524
+  role: limpio
+- lang: es
+  title: Río de la Plata
+  revid: 174246084
+  role: limpio
+- lang: es
+  title: Spheniscidae
+  revid: 175932455
+  role: limpio
+- lang: es
+  title: Tango
+  revid: 176138894
+  role: limpio
+- lang: es
+  title: Volcán
+  revid: 175841461
+  role: limpio
+- lang: en
+  title: AI safety
+  revid: 1384830136
+  role: hard_negative
+- lang: en
+  title: Adversarial machine learning
+  revid: 1384643539
+  role: hard_negative
+- lang: en
+  title: Large language model
+  revid: 1384841522
+  role: hard_negative
+- lang: en
+  title: Prompt injection
+  revid: 1384695851
+  role: hard_negative
+- lang: es
+  title: Aprendizaje automático antagónico
+  revid: 174673990
+  role: hard_negative
+- lang: es
+  title: Modelo de lenguaje de gran tamaño
+  revid: 175941397
+  role: hard_negative
+readmes:
+- repo: psf/requests
+  path: README.md
+  sha: 3c7baaa05ab4aa49cc819ce3a819d260de19c157
+  license: Apache-2.0
+- repo: pallets/flask
+  path: README.md
+  sha: 49943b5a94413a530761350f04e896f76e8d620e
+  license: BSD-3-Clause
+- repo: fastapi/fastapi
+  path: README.md
+  sha: 84d5f8ea759355e26d5a36f9c5c5652df924328e
+  license: MIT
+- repo: pydantic/pydantic
+  path: README.md
+  sha: 560f0f96a37d6913afdfddb2de22030ef08e68c3
+  license: MIT
+- repo: encode/httpx
+  path: README.md
+  sha: b5addb64f0161ff6bfe94c124ef76f6a1fba5254
+  license: BSD-3-Clause
+- repo: Textualize/rich
+  path: README.md
+  sha: 3a109ccdffe5b2d0e30684a304fbd388e99ce57b
+  license: MIT
+- repo: pytest-dev/pytest
+  path: README.rst
+  sha: 1b6f4419c6fe9371a8d8c52c12ed0a1577c2504a
+  license: MIT
+- repo: psf/black
+  path: README.md
+  sha: b4f1fcae48826790b6f93ca9226d20003bce0eaa
+  license: MIT
+- repo: sqlalchemy/sqlalchemy
+  path: README.rst
+  sha: babad5f9065472310c5c018337389357c388712a
+  license: MIT
+- repo: pandas-dev/pandas
+  path: README.md
+  sha: 0e93a6884748a269ead954a6acc731fe9c080993
+  license: BSD-3-Clause
+- repo: django/django
+  path: README.rst
+  sha: 9425a85c90c2640f45e311fe2dd1f912553100d1
+  license: BSD-3-Clause
+- repo: scikit-learn/scikit-learn
+  path: README.rst
+  sha: bf434819bd98a894a772d68c3d69fffd88fbc6cb
+  license: BSD-3-Clause

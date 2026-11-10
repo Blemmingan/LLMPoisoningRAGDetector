@@ -62,3 +62,8 @@ data/usage/
 .DS_Store
 .vscode/
 .idea/
+
+# Evaluation dataset: download cache and generated documents
+# (rebuild with `corpus-forensics eval build`)
+data/eval/cache/
+data/eval/v1/

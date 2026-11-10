@@ -299,6 +299,66 @@ def kb_stats() -> None:
 # -----------------------------------------------------------------------------
 
 
+@eval_app.command(name="build")
+def eval_build(
+    out: Annotated[Path, typer.Option("--out", "-o", help="Output dataset directory.")] = Path(
+        "data/eval/v1"
+    ),
+    sources: Annotated[Path, typer.Option("--sources", help="Pinned clean sources (YAML).")] = Path(
+        "data/eval/sources.yaml"
+    ),
+    cache: Annotated[
+        Path, typer.Option("--cache", help="Download cache for the pinned sources.")
+    ] = Path("data/eval/cache"),
+    seed: Annotated[int, typer.Option("--seed", help="Random seed.")] = 42,
+    n_clean: Annotated[int, typer.Option("--n-clean")] = 60,
+    n_poisoned: Annotated[int, typer.Option("--n-poisoned")] = 100,
+    n_hard_negative: Annotated[int, typer.Option("--n-hard-negative")] = 30,
+) -> None:
+    """Build the evaluation dataset from pinned texts and held-out attacks (no LLM calls)."""
+    from corpus_forensics.evaluation.build_dataset import build_dataset
+
+    card = build_dataset(
+        get_settings(),
+        out_dir=out,
+        sources_path=sources,
+        cache_dir=cache,
+        seed=seed,
+        n_clean=n_clean,
+        n_poisoned=n_poisoned,
+        n_hard_negative=n_hard_negative,
+    )
+    rprint(f"[green]✓ Dataset written to {out} ({card['total']} documents)[/green]")
+    _print_dataset_card(card)
+
+
+@eval_app.command(name="describe")
+def eval_describe(
+    dataset: Annotated[Path, typer.Option("--dataset", "-d", help="Dataset directory.")] = Path(
+        "data/eval/v1"
+    ),
+) -> None:
+    """Show the composition of an evaluation dataset."""
+    from corpus_forensics.evaluation.build_dataset import describe_labels, read_labels
+
+    _print_dataset_card(describe_labels(read_labels(dataset)))
+
+
+def _print_dataset_card(card: dict[str, Any]) -> None:
+    table = Table(title="Evaluation dataset composition")
+    table.add_column("Dimension", style="cyan")
+    table.add_column("Counts")
+    for key, value in card.items():
+        if isinstance(value, dict):
+            table.add_row(
+                key,
+                escape(
+                    ", ".join(f"{k}: {v}" for k, v in sorted(value.items(), key=lambda kv: -kv[1]))
+                ),
+            )
+    console.print(table)
+
+
 @eval_app.command(name="run")
 @stop_on_budget
 def eval_run(

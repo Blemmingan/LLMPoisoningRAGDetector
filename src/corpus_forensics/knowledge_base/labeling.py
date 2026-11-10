@@ -148,11 +148,16 @@ CONDITIONAL = re.compile(
     r"\b(?:then|respond|answer|reply|say|antworte|responde|di)\b",
     re.I | re.S,
 )
-MISINFORMATION = re.compile(
+# Orders to fabricate content are injected instructions (in scope, like BIPIA's
+# "Misinformation & Propaganda" test category); a fake context document is misinformation
+# content and stays out of scope.
+FABRICATION_ORDER = re.compile(
     r"untrue|false headline|fake news|falsch\w* (?:schlagzeile|nachricht)|"
-    r"lie about|desinformaci|noticia falsa|make something up|erfinde etwas|"
-    r"unwahre überschrift|"
-    r"^\s*(?:document context|context|kontext|artikel|\$documents)\b\s*[:{\"]?",
+    r"lie about|noticia falsa|make something up|erfinde etwas|unwahre überschrift",
+    re.I,
+)
+FAKE_CONTEXT = re.compile(
+    r"^\s*(?:document context|context|kontext|artikel|\$documents)\b\s*[:{\"]?|desinformaci",
     re.I,
 )
 SPACED_LETTERS = re.compile(r"(?:\b\w\s){6,}\w\b|(?:[\\\s]*\\[\\\s]*\w){6,}")
@@ -187,6 +192,31 @@ BIPIA_RULES: dict[str, tuple[TipoDeAtaque | None, str]] = {
     "Network Propagation": (T.INYECCION_DIRECTA, "bipia_codigo_malicioso"),
     "Exploiting System Vulnerabilities": (T.INYECCION_DIRECTA, "bipia_codigo_malicioso"),
     "Cryptocurrency Mining": (T.INYECCION_DIRECTA, "bipia_codigo_malicioso"),
+}
+
+# BIPIA's test split uses different categories (and "Language Translation" changes meaning:
+# in train it is an innocuous task, in test an instruction about the model's answer).
+BIPIA_TEST_RULES: dict[str, tuple[TipoDeAtaque | None, str]] = {
+    "Task Automation": (None, "bipia_pregunta_inocua"),
+    "Business Intelligence": (None, "bipia_pregunta_inocua"),
+    "Conversational Agent": (None, "bipia_pregunta_inocua"),
+    "Research Assistance": (None, "bipia_pregunta_inocua"),
+    "Sentiment Analysis": (None, "bipia_pregunta_inocua"),
+    "Substitution Ciphers": (T.INYECCION_DIRECTA, "bipia_formato_respuesta"),
+    "Base Encoding": (T.INYECCION_DIRECTA, "bipia_formato_respuesta"),
+    "Reverse Text": (T.INYECCION_DIRECTA, "bipia_formato_respuesta"),
+    "Emoji Substitution": (T.INYECCION_DIRECTA, "bipia_formato_respuesta"),
+    "Language Translation": (T.INYECCION_DIRECTA, "bipia_formato_respuesta"),
+    "Information Dissemination": (T.INYECCION_DIRECTA, "bipia_contenido_respuesta"),
+    "Marketing & Advertising": (T.INYECCION_DIRECTA, "bipia_contenido_respuesta"),
+    "Entertainment": (T.INYECCION_DIRECTA, "bipia_contenido_respuesta"),
+    "Scams & Fraud": (T.INYECCION_DIRECTA, "bipia_enlace_malicioso"),
+    "Misinformation & Propaganda": (T.INYECCION_DIRECTA, "bipia_contenido_respuesta"),
+    "Data Eavesdropping": (T.EXFILTRACION, "bipia_codigo_robo_datos"),
+    "Traffic Analysis": (T.EXFILTRACION, "bipia_codigo_robo_datos"),
+    "Keylogging": (T.EXFILTRACION, "bipia_codigo_robo_datos"),
+    "Screen Scraping": (T.EXFILTRACION, "bipia_codigo_robo_datos"),
+    "Introduce System Fingerprinting": (T.EXFILTRACION, "bipia_codigo_robo_datos"),
 }
 
 ATLAS_RULES: dict[str, TipoDeAtaque] = {
@@ -323,13 +353,16 @@ def label_entry(entry: AttackEntry) -> tuple[AttackEntry | None, str]:
 
     if source == "bipia":
         category = str(entry.metadata.get("categoria_origen", ""))
-        attack_type, rule = BIPIA_RULES.get(category, (T.INYECCION_DIRECTA, "bipia_sin_regla"))
+        rules = BIPIA_TEST_RULES if entry.metadata.get("split") == "test" else BIPIA_RULES
+        attack_type, rule = rules.get(category, (T.INYECCION_DIRECTA, "bipia_sin_regla"))
         return (_apply(entry, attack_type, rule), rule) if attack_type else (None, rule)
 
     if source == "deepset_prompt_injections":
         attack_type, rule = classify_text(text)
-        if MISINFORMATION.search(text) and attack_type in (None, T.INYECCION_DIRECTA):
+        if FAKE_CONTEXT.search(text) and attack_type in (None, T.INYECCION_DIRECTA):
             return None, "desinformacion_fuera_de_alcance"
+        if attack_type is None and FABRICATION_ORDER.search(text):
+            attack_type, rule = T.INYECCION_DIRECTA, "orden_de_inventar"
         return (_apply(entry, attack_type, rule), rule) if attack_type else (None, rule)
 
     if source == "hackaprompt":

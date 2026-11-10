@@ -129,8 +129,10 @@ Entries are labeled by rules during `kb ingest` (`knowledge_base/labeling.py`, n
   are dropped: they are attacks only by context.
 - **deepset** and **HackAPrompt** by multilingual patterns (EN/DE/ES/FR/RU...) for
   instruction override, role-play, prompt leaking, exfiltration and planted triggers.
-  deepset rows asking for misinformation or planting false "context" are dropped (factual
-  poisoning is out of scope), as are rows with no instruction aimed at the model.
+  deepset rows that plant a false "context" document are dropped (factual poisoning is out of
+  scope), as are rows with no instruction aimed at the model. An *order* to fabricate ("write
+  an untrue headline") is an injected instruction and is kept as direct injection, the same
+  criterion BIPIA's "Misinformation & Propaganda" test category gets.
 - **MITRE ATLAS** by technique ID and **OWASP** by scenario (`etiquetado: fuente`).
 - Concealment is detected from the text: invisible Unicode, base64, HTML comments,
   non-Latin scripts, homoglyphs and character separation (the last two map to `otro`).
@@ -226,11 +228,45 @@ uv run corpus-forensics analyze tests/fixtures/
 uv run corpus-forensics analyze document.pdf --out reports/ --format md
 ```
 
-### 4. Run Benchmark Evaluation
+### 4. Build the Evaluation Dataset
+
+`eval build` generates the benchmark from pinned public texts and attacks the knowledge base
+never saw (no LLM calls, deterministic for a given `--seed`):
+
+```bash
+uv run corpus-forensics kb download            # attack datasets (once)
+uv run corpus-forensics eval build --out data/eval/v1 --seed 42
+uv run corpus-forensics eval describe --dataset data/eval/v1
+```
+
+- **Clean texts**: Wikipedia articles (English and Spanish) at a fixed revision and project
+  READMEs at a fixed commit, listed in `data/eval/sources.yaml`. Downloads are cached in
+  `data/eval/cache/` (the Wikipedia User-Agent carries the repository URL, as Wikimedia asks).
+- **Hard negatives**: passages of articles that *discuss* prompt injection and adversarial
+  attacks (e.g. "Prompt injection", "Adversarial machine learning") without being one.
+- **Poisoned documents**: a clean text with one attack inserted **verbatim** as its own visible
+  paragraph at the start, middle or end. Attacks come only from held-out data: deepset `test`,
+  BIPIA `test` (its categories differ from train; data-theft code snippets go into READMEs) and
+  HackAPrompt successful attacks outside the knowledge-base sample. Nothing is paraphrased or
+  obfuscated here; obfuscated cases are the ones that already come that way in the published data.
+- **Selection**: stratified by attack type (`TYPE_QUOTAS`), round-robin over (source,
+  concealment) buckets, dropping near-duplicates (same first 40 normalized characters).
+- **Labels**: attack type and concealment come from the rule-based labeling; `fragmento_exacto`
+  is the inserted text; `sutileza` is `disfrazado` when the attack carries a concealment technique.
+  Extra provenance fields (`fuente_texto`, `fuente_ataque`, `id_ataque`, `regla_etiqueta`,
+  `formato`, `idioma_texto`) are ignored by the harness but allow slicing.
+
+Default composition (seed 42): 190 documents, 60 clean / 100 poisoned / 30 hard negatives;
+direct injection 43, jailbreak 20, exfiltration 15, prompt leaking 12, conditional trigger 10;
+37 of the 100 attacks are concealed. Known limitation: held-out data has few conditional
+triggers and no plain-text exfiltration, so those slices are small. The generated folder is
+git-ignored; rebuild it with the command above.
+
+### 5. Run Benchmark Evaluation
 Execute the evaluation harness across a labeled dataset:
 
 ```bash
-uv run corpus-forensics eval run --dataset tests/fixtures/ --out reports/eval/
+uv run corpus-forensics eval run --dataset data/eval/v1 --out reports/eval/
 ```
 
 ---
