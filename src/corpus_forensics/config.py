@@ -60,6 +60,9 @@ class Settings(BaseSettings):
 
     # Retrieval configuration
     top_k: int = Field(default=3, description="Number of nearest attack entries to retrieve")
+    literature_top_k: int = Field(
+        default=2, description="Number of literature passages to retrieve for contextual grounding"
+    )
 
     # Provider configurations (default to mock implementations)
     llm_provider: str = Field(default="mock", description="LLM provider name: 'mock', etc.")

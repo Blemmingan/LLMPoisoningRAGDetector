@@ -3,6 +3,7 @@
 from pathlib import Path
 
 from corpus_forensics.schemas import Chunk, RetrievedAttack
+from corpus_forensics.vectorstore.literature_store import LiteraturePassage
 
 PROMPT_TEMPLATE_PATH = Path(__file__).resolve().parent / "prompts" / "analyst_prompt.txt"
 
@@ -33,12 +34,18 @@ class PromptBuilder:
             raise FileNotFoundError(f"Analyst prompt template not found at {self.template_path}")
         self.template_content = self.template_path.read_text(encoding="utf-8")
 
-    def build_prompt(self, chunk: Chunk, retrieved_attacks: list[RetrievedAttack]) -> str:
-        """Format the prompt template for a specific chunk and its retrieved attacks.
+    def build_prompt(
+        self,
+        chunk: Chunk,
+        retrieved_attacks: list[RetrievedAttack],
+        retrieved_literature: list[LiteraturePassage] | None = None,
+    ) -> str:
+        """Format the prompt template for a specific chunk, retrieved attacks, and literature context.
 
         Args:
             chunk: Chunk to analyze.
             retrieved_attacks: Nearest attack entries from the vector store.
+            retrieved_literature: Optional relevant research literature passages.
 
         Returns:
             Formatted prompt string.
@@ -49,8 +56,8 @@ class PromptBuilder:
         # Format retrieved attacks
         retrieved_summary = self._format_retrieved_attacks(retrieved_attacks)
 
-        # TODO(team): Inject dynamic few-shot examples of hard negatives vs. true positives
-        # to guide the LLM when analyzing academic papers and security benchmarks.
+        # Format retrieved literature context
+        literature_summary = self._format_retrieved_literature(retrieved_literature or [])
 
         return self.template_content.format(
             document_id=chunk.document_id,
@@ -60,6 +67,7 @@ class PromptBuilder:
             chunk_text=chunk.text,
             preprocessing_annotations=annotations_summary,
             retrieved_attacks=retrieved_summary,
+            retrieved_literature=literature_summary,
             output_language=self.output_language,
         )
 
@@ -102,5 +110,20 @@ class PromptBuilder:
                 f"Source: {a.source})\n"
                 f"  Text snippet: {repr(a.text[:120])}\n"
                 f"  Mitigation: {a.mitigation}"
+            )
+        return "\n".join(lines)
+
+    def _format_retrieved_literature(self, passages: list[LiteraturePassage]) -> str:
+        """Render retrieved literature passages from security research papers and standards."""
+        if not passages:
+            return "No relevant security research literature found in Knowledge Base."
+
+        lines: list[str] = []
+        for p in passages:
+            title = p.titulo or p.fuente_id
+            sec = f" (Section: {p.seccion})" if p.seccion else ""
+            lines.append(
+                f"- [Source: {title}{sec}] (Similarity: {p.similarity_score:.2f})\n"
+                f"  Excerpt: {repr(p.texto[:250])}"
             )
         return "\n".join(lines)

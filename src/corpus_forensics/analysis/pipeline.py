@@ -26,6 +26,7 @@ from corpus_forensics.preprocessing.chunker import Chunker
 from corpus_forensics.schemas import AnalisisMetadata, DocumentReport
 from corpus_forensics.vectorstore.base import VectorStore
 from corpus_forensics.vectorstore.chroma_store import ChromaVectorStore
+from corpus_forensics.vectorstore.literature_store import LiteratureStore
 
 
 class ForensicPipeline:
@@ -37,6 +38,7 @@ class ForensicPipeline:
         llm_client: LLMClient | None = None,
         embedder: Embedder | None = None,
         vector_store: VectorStore | None = None,
+        literature_store: LiteratureStore | None = None,
     ) -> None:
         """Initialize pipeline components with dependency injection.
 
@@ -45,6 +47,7 @@ class ForensicPipeline:
             llm_client: LLM client (defaults to configured provider).
             embedder: Embedding model (defaults to configured provider).
             vector_store: Vector store (defaults to Chroma persistent store).
+            literature_store: Literature store for academic context (defaults to Chroma persistent store).
         """
         self.settings = settings or get_settings()
 
@@ -54,6 +57,10 @@ class ForensicPipeline:
         )
 
         self.vector_store = vector_store or ChromaVectorStore(
+            persist_dir=self.settings.vectorstore_dir
+        )
+
+        self.literature_store = literature_store or LiteratureStore(
             persist_dir=self.settings.vectorstore_dir
         )
 
@@ -69,6 +76,8 @@ class ForensicPipeline:
             vector_store=self.vector_store,
             embedder=self.embedder,
             top_k=self.settings.top_k,
+            literature_store=self.literature_store,
+            literature_top_k=self.settings.literature_top_k,
         )
 
         self.prompt_builder = PromptBuilder(output_language=self.settings.report_language)
@@ -102,7 +111,10 @@ class ForensicPipeline:
         # 3 & 4. Per-chunk retrieval and LLM analysis
         for chunk in chunks:
             retrieved_attacks = self.retriever.retrieve_for_chunk(chunk)
-            finding = self.analyst.analyze_chunk(chunk, retrieved_attacks)
+            retrieved_literature = self.retriever.retrieve_literature_for_chunk(chunk)
+            finding = self.analyst.analyze_chunk(
+                chunk, retrieved_attacks, retrieved_literature=retrieved_literature
+            )
             chunk_findings.append(finding)
 
         # 5. Cross-chunk Aggregation & Deduplication

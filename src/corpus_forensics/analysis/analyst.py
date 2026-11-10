@@ -11,6 +11,7 @@ from corpus_forensics.schemas import (
     Hallazgo,
     RetrievedAttack,
 )
+from corpus_forensics.vectorstore.literature_store import LiteraturePassage
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +31,12 @@ class ChunkAnalyst:
         self.llm_client = llm_client
         self.prompt_builder = prompt_builder
 
-    def analyze_chunk(self, chunk: Chunk, retrieved_attacks: list[RetrievedAttack]) -> ChunkFinding:
+    def analyze_chunk(
+        self,
+        chunk: Chunk,
+        retrieved_attacks: list[RetrievedAttack],
+        retrieved_literature: list[LiteraturePassage] | None = None,
+    ) -> ChunkFinding:
         """Analyze a chunk in context with retrieved attacks and return structured findings.
 
         The LLM answers with `AnalisisChunkLLM`; pipeline-owned fields (chunk index,
@@ -41,11 +47,14 @@ class ChunkAnalyst:
         Args:
             chunk: Text chunk under analysis.
             retrieved_attacks: Most similar attacks from the knowledge base.
+            retrieved_literature: Optional relevant research literature passages.
 
         Returns:
             ChunkFinding for the chunk.
         """
-        prompt = self.prompt_builder.build_prompt(chunk, retrieved_attacks)
+        prompt = self.prompt_builder.build_prompt(
+            chunk, retrieved_attacks, retrieved_literature=retrieved_literature
+        )
         try:
             output = self.llm_client.generate_structured(prompt, AnalisisChunkLLM)
         except BudgetExceededError:
