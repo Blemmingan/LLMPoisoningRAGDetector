@@ -1,24 +1,83 @@
 # Ablation study: each variant overrides settings (the CF_* variables, lowercase, no prefix).
+# `base` is the default configuration (rag_avanzado: rewriting + hybrid + reranking).
+# `compare_to` = variant its differences are taken against (default: base).
 # `requires_llm: true` = the variant only changes what the analyst LLM does; with
-# --retrieval-only it is skipped (its retrieval would be identical to the base).
+# --retrieval-only it is skipped (its retrieval would be identical to its reference).
 variants:
   - name: base
-    description: Configuración por defecto
+    description: Configuración por defecto (rag_avanzado - reescritura + híbrida + reranker)
+    question: Último paso de la cadena incremental (+ reranker)
+    # its row shows the reranker's contribution; the LLM variants compare against base
+    compare_to: hibrido_reescritura
     overrides: {}
 
-  - name: sin_normalizacion
-    description: Busca con el texto crudo en vez de la vista normalizada
-    question: ¿Sirve la normalización defensiva para los ataques disfrazados?
+  # ---- Incremental chain of the retriever (consigna: cambios incrementales) ----
+  - name: retriever_basico
+    description: Solo búsqueda por embeddings (sin Advanced RAG)
+    question: Punto de partida de la cadena incremental
+    compare_to: retriever_basico
+    overrides: &basico
+      query_rewrite: false
+      hybrid_search: false
+      rerank: false
+
+  - name: hibrido
+    description: Básico + búsqueda híbrida BM25 con Reciprocal Rank Fusion
+    question: ¿Las palabras literales de los ataques mejoran la búsqueda?
+    compare_to: retriever_basico
     overrides:
+      query_rewrite: false
+      hybrid_search: true
+      rerank: false
+
+  - name: hibrido_reescritura
+    description: Híbrida + reescritura determinística (oraciones sospechosas)
+    question: ¿Enfocar la consulta reduce la dilución del ataque?
+    compare_to: hibrido
+    overrides:
+      query_rewrite: true
+      hybrid_search: true
+      rerank: false
+  # the next step of the chain is `base` (+ reranker)
+
+  # ---- Each technique alone, against the basic retriever ----
+  - name: rerank
+    description: Básico + solo reranker
+    question: ¿El reranker solo sube el ejemplo del tipo correcto?
+    compare_to: retriever_basico
+    overrides:
+      query_rewrite: false
+      hybrid_search: false
+      rerank: true
+
+  - name: reescritura
+    description: Básico + solo reescritura
+    question: ¿La reescritura sola ayuda?
+    compare_to: retriever_basico
+    overrides:
+      query_rewrite: true
+      hybrid_search: false
+      rerank: false
+
+  # ---- Preprocessing and chunking (measured on the basic retriever) ----
+  - name: sin_normalizacion
+    description: Básico, buscando con el texto crudo en vez de la vista normalizada
+    question: ¿Sirve la normalización defensiva para los ataques disfrazados?
+    compare_to: retriever_basico
+    overrides:
+      <<: *basico
       normalize_for_retrieval: false
 
   - name: chunks_grandes
-    description: Chunks de 1000 caracteres con overlap 200 (base 500/100)
+    description: Básico con chunks de 1000 caracteres y overlap 200 (base 500/100)
     question: ¿El ataque se diluye en chunks más grandes?
+    compare_to: retriever_basico
     overrides:
+      <<: *basico
       chunk_size: 1000
       chunk_overlap: 200
 
+  # ---- Analyst (need the real LLM), against base ----
   - name: sin_ejemplos
     description: Sin RAG de ataques conocidos (top_k = 0); el LLM decide solo con la literatura
     question: ¿El RAG de ejemplos mejora al LLM solo?
@@ -48,37 +107,3 @@ variants:
     requires_llm: true
     overrides:
       analyst_prompt: analyst_prompt_sin_hard_negatives
-
-  # ---- Advanced RAG without LLM (knowledge base of known attacks only) ----
-  - name: rerank
-    description: Reranking de 20 candidatos con un cross-encoder multilingüe local (técnica principal)
-    question: ¿El reranker sube el ejemplo del tipo correcto al top-3?
-    overrides:
-      rerank: true
-
-  - name: hibrido
-    description: Búsqueda híbrida BM25 + embeddings fusionada con Reciprocal Rank Fusion
-    question: ¿Las palabras literales de los ataques mejoran la búsqueda?
-    overrides:
-      hybrid_search: true
-
-  - name: reescritura
-    description: Busca con las oraciones más sospechosas del chunk (reescritura determinística)
-    question: ¿Enfocar la consulta reduce la dilución del ataque en el texto benigno?
-    overrides:
-      query_rewrite: true
-
-  - name: rag_avanzado
-    description: Reescritura + búsqueda híbrida + reranking
-    question: ¿Las tres técnicas juntas superan a cada una por separado?
-    overrides:
-      query_rewrite: true
-      hybrid_search: true
-      rerank: true
-
-  - name: hibrido_reescritura
-    description: Reescritura + búsqueda híbrida, sin reranker
-    question: ¿Las dos técnicas baratas juntas alcanzan sin el costo del reranker?
-    overrides:
-      query_rewrite: true
-      hybrid_search: true

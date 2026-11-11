@@ -294,8 +294,13 @@ def retriever_metrics(
     per_type = {
         t: summarize(by_type[t]) | chance.get(t, {}) for t in ATTACK_TYPES if by_type.get(t)
     }
+    macro = _avg(
+        [v["context_precision"] for v in per_type.values() if v["context_precision"] is not None]
+    )
     return {
         "k": k,
+        # every attack type weighs the same (the knowledge base is 77% direct injection)
+        "context_precision_macro": macro,
         "envenenados": len(per_doc),
         "ataque_localizado_en_un_chunk": len(located),
         "global": summarize(located),

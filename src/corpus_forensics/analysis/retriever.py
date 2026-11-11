@@ -108,11 +108,14 @@ class AttackRetriever:
         embedding and the stored entry, so they stay comparable across configurations.
         """
         base_query = self.query_text(chunk)
-        queries = (
+        # the whole chunk is always searched; rewriting adds its suspicious sentences as
+        # extra queries (fused with RRF), so focusing never loses the chunk's context
+        focused = (
             rewrite_query(base_query, self.query_rewrite_max_sentences)
             if self.query_rewrite
-            else [base_query]
+            else []
         )
+        queries = [base_query, *[q for q in focused if q != base_query]]
         pool = max(self.top_k, self.rerank_candidates)
         entries: dict[str, RetrievedAttack] = {}
         rankings: list[list[str]] = []
@@ -131,7 +134,8 @@ class AttackRetriever:
 
         rerank_scores: dict[str, float] = {}
         if self.reranker is not None and candidates:
-            focus = " ".join(queries)
+            # the reranker reads the focused sentences when there are any
+            focus = " ".join(queries[1:]) or base_query
             scores = self.reranker.score(focus, [entries[c].text for c in candidates])
             rerank_scores = dict(zip(candidates, scores, strict=True))
             candidates = sorted(candidates, key=lambda c: -rerank_scores[c])

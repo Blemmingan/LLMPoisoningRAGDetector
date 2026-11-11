@@ -63,6 +63,7 @@ def render_markdown(metrics: EvaluationMetrics) -> str:
             ["Métrica", "Valor"],
             [
                 [f"Context Precision@{r.get('k')}", g.get("context_precision")],
+                ["Context Precision macro (promedio por tipo)", r.get("context_precision_macro")],
                 ["Context Recall", g.get("context_recall")],
                 ["MRR", g.get("mrr")],
                 [f"NDCG@{r.get('k')}", g.get("ndcg")],

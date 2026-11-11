@@ -3,6 +3,7 @@
 from corpus_forensics.schemas import (
     HIDDEN_SECTION_HIDDEN_ELEMENTS,
     HIDDEN_SECTION_HTML_COMMENTS,
+    HIDDEN_SECTION_PDF_HIDDEN_TEXT,
     HIDDEN_SECTION_PDF_METADATA,
     CanalDocumento,
     Document,
@@ -13,8 +14,16 @@ from corpus_forensics.schemas import (
 _HIDDEN_SECTIONS = (
     HIDDEN_SECTION_HTML_COMMENTS,
     HIDDEN_SECTION_HIDDEN_ELEMENTS,
+    HIDDEN_SECTION_PDF_HIDDEN_TEXT,
     HIDDEN_SECTION_PDF_METADATA,
 )
+# Concealment implied by where in the hidden channel a fragment was found: the loaders
+# strip the markers (comment delimiters, CSS, PDF render state), so the LLM cannot tell.
+SECTION_CONCEALMENT = {
+    HIDDEN_SECTION_HTML_COMMENTS: TecnicaDeOcultamiento.COMENTARIO_HTML,
+    HIDDEN_SECTION_HIDDEN_ELEMENTS: TecnicaDeOcultamiento.TEXTO_BLANCO,
+    HIDDEN_SECTION_PDF_HIDDEN_TEXT: TecnicaDeOcultamiento.TEXTO_BLANCO,
+}
 
 
 def hidden_section_at(hidden_text: str, offset: int) -> str | None:
@@ -92,10 +101,10 @@ class FindingVerifier:
                         "Literal substring verified against the hidden channel "
                         "(HTML comments, hidden elements or PDF metadata)."
                     )
-                    # Deterministic concealment tagging: the loader strips the <!-- -->
-                    # markers, so the LLM cannot always tell the fragment was a comment.
-                    if hidden_section_at(hidden_text, idx) == HIDDEN_SECTION_HTML_COMMENTS:
-                        self._add_technique(finding, TecnicaDeOcultamiento.COMENTARIO_HTML)
+                    # Deterministic concealment tagging from the hidden-channel section
+                    section = hidden_section_at(hidden_text, idx)
+                    if section in SECTION_CONCEALMENT:
+                        self._add_technique(finding, SECTION_CONCEALMENT[section])
             else:
                 # Anti-hallucination failure: model quoted text that does not exist in the source document
                 finding.verificado = False

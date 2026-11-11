@@ -95,18 +95,19 @@ class Settings(BaseSettings):
         description="Minimum finding severity that counts: 'baja', 'media', 'alta' or 'critica'",
     )
 
-    # Advanced retrieval of known attacks (no LLM): rewriting -> hybrid -> reranking
+    # Advanced retrieval of known attacks (no LLM): rewriting -> hybrid -> reranking.
+    # All on by default ("rag_avanzado", the best configuration in the ablation).
     query_rewrite: bool = Field(
-        default=False, description="Search with the most suspicious sentences of the chunk"
+        default=True, description="Search with the most suspicious sentences of the chunk"
     )
     query_rewrite_max_sentences: int = Field(
         default=3, description="Suspicious sentences searched separately per chunk"
     )
     hybrid_search: bool = Field(
-        default=False, description="Fuse BM25 with the embedding search (Reciprocal Rank Fusion)"
+        default=True, description="Fuse BM25 with the embedding search (Reciprocal Rank Fusion)"
     )
     rrf_k: int = Field(default=60, description="Reciprocal Rank Fusion constant")
-    rerank: bool = Field(default=False, description="Rerank candidates with a cross-encoder")
+    rerank: bool = Field(default=True, description="Rerank candidates with a cross-encoder")
     rerank_model: str = Field(
         default="cross-encoder/mmarco-mMiniLMv2-L12-H384-v1",
         description="Cross-encoder model name or local path",

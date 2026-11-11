@@ -39,6 +39,7 @@ class Variant(BaseModel):
     description: str = ""
     question: str | None = None
     requires_llm: bool = False
+    compare_to: str = Field(default="base", description="Variant the differences are taken against")
     overrides: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -53,6 +54,10 @@ def load_variants(path: Path) -> list[Variant]:
         unknown = set(variant.overrides) - set(Settings.model_fields)
         if unknown:
             raise ValueError(f"Variant '{variant.name}': unknown settings {sorted(unknown)}")
+        if variant.compare_to not in names:
+            raise ValueError(
+                f"Variant '{variant.name}': compare_to '{variant.compare_to}' not found"
+            )
     return variants
 
 
@@ -125,6 +130,7 @@ def metrics_row(metrics: dict[str, Any]) -> dict[str, Any]:
     glob = _get(metrics, "retriever", "global") or {}
     return {
         "context_precision": glob.get("context_precision"),
+        "cp_macro": _get(metrics, "retriever", "context_precision_macro"),
         "context_recall": glob.get("context_recall"),
         "mrr": glob.get("mrr"),
         "hit_at_1": glob.get("hit_at_1"),
@@ -144,6 +150,7 @@ def metrics_row(metrics: dict[str, Any]) -> dict[str, Any]:
 
 RETRIEVER_COLUMNS = (
     "context_precision",
+    "cp_macro",
     "context_recall",
     "mrr",
     "hit_at_1",
@@ -167,20 +174,22 @@ def summarize(out_dir: Path, variants: list[Variant]) -> dict[str, Any]:
                 "descripcion": variant.description,
                 "pregunta": variant.question,
                 "requiere_llm": variant.requires_llm,
+                "comparada_con": variant.compare_to,
                 "solo_retrieval": _get(metrics, "config", "solo_retrieval"),
                 "llm_is_mock": _get(metrics, "config", "llm_is_mock"),
                 **metrics_row(metrics),
             }
         )
-    base = next((r for r in rows if r["variante"] == BASE_VARIANT), None)
+    by_name = {r["variante"]: r for r in rows}
     for row in rows:
+        reference = by_name.get(row["comparada_con"])
         row["delta"] = {
-            key: round(row[key] - base[key], 4)
+            key: round(row[key] - reference[key], 4)
             for key in (*RETRIEVER_COLUMNS, *GENERATOR_COLUMNS)
-            if base is not None
-            and row is not base
+            if reference is not None
+            and reference is not row
             and isinstance(row.get(key), int | float)
-            and isinstance(base.get(key), int | float)
+            and isinstance(reference.get(key), int | float)
         }
     summary = {"variantes": rows}
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -196,22 +205,29 @@ def _cell(row: dict[str, Any], key: str) -> str:
     if value is None:
         return "—"
     delta = row.get("delta", {}).get(key)
-    return f"{value:.3f}" + (f" ({delta:+.3f})" if delta else "")
+    return f"{value:.3f}" + (f" ({delta:+.3f})" if delta is not None else "")
+
+
+def _vs(row: dict[str, Any]) -> str:
+    return "—" if row["variante"] == row.get("comparada_con") else str(row.get("comparada_con"))
 
 
 def render_summary(rows: list[dict[str, Any]]) -> str:
     lines = [
         "# Ablación",
         "",
-        "Cada celda: valor (diferencia contra `base`).",
+        "Cada celda: valor (diferencia contra la variante de la columna *vs*).",
         "",
         "## Retriever",
         "",
-        "| Variante | Context Precision | Context Recall | MRR | Hit@1 | CP disfrazados | AUROC similitud |",
-        "|---|---|---|---|---|---|---|",
+        "| Variante | vs | Context Precision | CP macro (por tipo) | Context Recall | MRR | Hit@1 "
+        "| CP disfrazados | AUROC similitud |",
+        "|---|---|---|---|---|---|---|---|---|",
     ]
     lines += [
-        f"| {r['variante']} | " + " | ".join(_cell(r, k) for k in RETRIEVER_COLUMNS) + " |"
+        f"| {r['variante']} | {_vs(r)} | "
+        + " | ".join(_cell(r, k) for k in RETRIEVER_COLUMNS)
+        + " |"
         for r in rows
         if r.get("context_precision") is not None or r["variante"] == BASE_VARIANT
     ]
@@ -224,11 +240,11 @@ def render_summary(rows: list[dict[str, Any]]) -> str:
                 "",
             ]
         lines += [
-            "| Variante | F1 | Macro-F1 | FPR hard negatives | FPR limpios | Faithfulness | Costo USD |",
-            "|---|---|---|---|---|---|---|",
+            "| Variante | vs | F1 | Macro-F1 | FPR hard negatives | FPR limpios | Faithfulness | Costo USD |",
+            "|---|---|---|---|---|---|---|---|",
         ]
         lines += [
-            f"| {r['variante']} | "
+            f"| {r['variante']} | {_vs(r)} | "
             + " | ".join(_cell(r, k) for k in GENERATOR_COLUMNS)
             + f" | {r.get('costo_usd')} |"
             for r in with_generator

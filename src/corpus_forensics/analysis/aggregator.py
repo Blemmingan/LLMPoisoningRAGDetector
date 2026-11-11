@@ -2,7 +2,98 @@
 
 from collections.abc import Sequence
 
-from corpus_forensics.schemas import Chunk, ChunkFinding, Hallazgo
+from corpus_forensics.schemas import (
+    HIDDEN_CHANNEL_SEPARATOR,
+    Chunk,
+    ChunkFinding,
+    Hallazgo,
+    Severidad,
+    TecnicaDeOcultamiento,
+)
+
+# Fragments of the same attack type closer than this (whitespace only in between) are
+# one payload that the chunk boundary cut in two.
+MAX_STITCH_GAP = 3
+_SEVERITY_RANK = {
+    Severidad.BAJA: 0,
+    Severidad.MEDIA: 1,
+    Severidad.ALTA: 2,
+    Severidad.CRITICA: 3,
+}
+
+
+def reconstruct_text(chunks: Sequence[Chunk]) -> str | None:
+    """The analyzed text rebuilt from overlapping chunks (None if they leave a gap)."""
+    text = ""
+    for chunk in sorted(chunks, key=lambda c: c.start):
+        if chunk.start > len(text):
+            return None
+        if chunk.end > len(text):
+            text = text[: chunk.start] + chunk.text
+    return text
+
+
+def locate(finding: Hallazgo, chunks_by_index: dict[int, Chunk]) -> tuple[int, int] | None:
+    """Absolute span of a finding's fragment inside its chunk, if it is quoted verbatim."""
+    chunk = chunks_by_index.get(finding.indice_chunk)
+    if chunk is None or not finding.fragmento_exacto:
+        return None
+    idx = chunk.text.find(finding.fragmento_exacto)
+    if idx == -1:
+        return None
+    return chunk.start + idx, chunk.start + idx + len(finding.fragmento_exacto)
+
+
+def merge_findings(first: Hallazgo, second: Hallazgo, fragment: str) -> Hallazgo:
+    """One finding for a stitched payload: strongest assessment, all techniques."""
+    lead = first if first.confianza >= second.confianza else second
+    techniques = list(dict.fromkeys(t for h in (first, second) for t in h.tecnica_de_ocultamiento))
+    if len(techniques) > 1:
+        techniques = [t for t in techniques if t != TecnicaDeOcultamiento.NINGUNA]
+    severity = max(first.severidad, second.severidad, key=lambda s: _SEVERITY_RANK[s])
+    return lead.model_copy(
+        update={
+            "fragmento_exacto": fragment,
+            "indice_chunk": min(first.indice_chunk, second.indice_chunk),
+            "confianza": max(first.confianza, second.confianza),
+            "severidad": severity,
+            "tecnica_de_ocultamiento": techniques,
+        }
+    )
+
+
+def stitch(findings: list[Hallazgo], chunks: Sequence[Chunk]) -> list[Hallazgo]:
+    """Join same-type findings whose fragments overlap or abut across chunk boundaries.
+
+    The joined fragment is cut from the document text, so it stays a verbatim quote
+    (the verifier checks it afterwards). Findings whose fragment is not verbatim in
+    their chunk, or that would join visible and hidden channels, are left as they are.
+    """
+    text = reconstruct_text(chunks)
+    if text is None:
+        return findings
+    by_index = {c.index: c for c in chunks}
+    located = [(span, h) for h in findings if (span := locate(h, by_index)) is not None]
+    others = [h for h in findings if locate(h, by_index) is None]
+    located.sort(key=lambda item: item[0])
+
+    merged: list[tuple[tuple[int, int], Hallazgo]] = []
+    for (start, end), finding in located:
+        if merged:
+            (m_start, m_end), current = merged[-1]
+            gap = text[m_end:start] if start > m_end else ""
+            joinable = (
+                finding.tipo_de_ataque == current.tipo_de_ataque
+                and start <= m_end + MAX_STITCH_GAP
+                and not gap.strip()
+            )
+            fragment = text[m_start : max(end, m_end)]
+            if joinable and HIDDEN_CHANNEL_SEPARATOR not in fragment:
+                new_span = (m_start, max(end, m_end))
+                merged[-1] = (new_span, merge_findings(current, finding, fragment))
+                continue
+        merged.append(((start, end), finding))
+    return [h for _, h in merged] + others
 
 
 class FindingAggregator:
@@ -65,9 +156,6 @@ class FindingAggregator:
             seen_fragments.add(key)
             deduped.append(h)
 
-        # TODO(team): Implement cross-chunk boundary stitching:
-        # 1. Inspect chunk boundary overlap regions for fragmented payloads (e.g. prefix in chunk N, suffix in chunk N+1).
-        # 2. Check if concatenating adjacent fragments exists contiguously in the document.
-        # 3. Handle multi-hop exfiltration triggers split across distant paragraphs.
-
-        return deduped
+        # Cross-chunk stitching: a payload cut by a chunk boundary becomes one finding.
+        # (Payloads split across distant paragraphs are out of scope.)
+        return stitch(deduped, chunks)

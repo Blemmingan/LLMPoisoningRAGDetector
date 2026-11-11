@@ -19,6 +19,8 @@ def _force_offline_providers(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     monkeypatch.setenv("CF_LLM_PROVIDER", "mock")
     monkeypatch.setenv("CF_EMBEDDER_PROVIDER", "mock")
+    # the cross-encoder (~470 MB) is not downloaded in tests; reranking has its own tests
+    monkeypatch.setenv("CF_RERANK", "false")
 
 
 @pytest.fixture

@@ -305,12 +305,13 @@ cites the one that supports its mitigation in `fuente_mitigacion_id`. The pipeli
 to title, section and URL (`fuente_mitigacion`) only when that passage was actually retrieved
 for the chunk; an invented id stays unresolved and counts against faithfulness.
 
-**Ablation study.** Variants are defined in `data/eval/ablations.yaml` (name, question and
-setting overrides); `eval ablation` runs each one into its own folder and writes
-`ablation_summary.md` with every metric and its difference against `base`:
+**Ablation study.** Variants are defined in `data/eval/ablations.yaml` (name, question,
+reference variant `compare_to` and setting overrides); `eval ablation` runs each one into its own
+folder and writes `ablation_summary.md` with every metric and its difference against the
+variant's reference:
 
 ```bash
-# variants measurable without the LLM (free): base, sin_normalizacion, chunks_grandes
+# retriever variants (free, no LLM calls)
 uv run corpus-forensics eval ablation --retrieval-only --out reports/ablation-retrieval
 # all variants with the real LLM; run `base` first so `sin_verificador` (same prompts)
 # is answered from the LLM cache at no cost
@@ -318,52 +319,59 @@ uv run corpus-forensics eval ablation --only base --out reports/ablation
 uv run corpus-forensics eval ablation --out reports/ablation
 ```
 
-| Variant | What changes | Question |
-|---|---|---|
-| `base` | Default configuration | Reference |
-| `sin_normalizacion` | Retrieval with the raw chunk text | Does the defensive normalization help disguised attacks? |
-| `chunks_grandes` | 1000-character chunks (overlap 200) instead of 500 | Is the attack diluted in larger chunks? |
-| `sin_ejemplos` | No known-attack retrieval (`top_k=0`) | Does the RAG of examples improve the LLM alone? |
-| `sin_literatura` | No literature retrieval (`literature_top_k=0`) | Does the literature help the analyst? |
-| `sin_verificador` | No confidence penalty, verified fragment not required | How much precision does the anti-hallucination check add? |
-| `prompt_sin_hard_negatives` | Prompt without the hard-negative policy and examples | Do the examples lower false positives on texts about attacks? |
-| `rerank` | Cross-encoder reranking of 20 candidates (main Advanced RAG technique) | Does the reranker lift the right-type example into the top 3? |
-| `hibrido` | BM25 + embeddings fused with Reciprocal Rank Fusion | Do the attacks' literal markers improve the search? |
-| `reescritura` | Search with the chunk's most suspicious sentences | Does focusing the query reduce dilution in benign text? |
-| `hibrido_reescritura` | Rewriting + hybrid, no reranker | Do the two cheap techniques suffice? |
-| `rag_avanzado` | Rewriting + hybrid + reranking | Do the three together beat each alone? |
+| Variant | Compared with | What changes | Question |
+|---|---|---|---|
+| `retriever_basico` | — | Embedding search only | Start of the incremental chain |
+| `hibrido` | `retriever_basico` | + BM25 fused with RRF | Do the attacks' literal markers help? |
+| `hibrido_reescritura` | `hibrido` | + query rewriting | Does focusing the query reduce dilution? |
+| `base` | `hibrido_reescritura` | + reranking (default configuration, `rag_avanzado`) | What does the reranker add? |
+| `rerank` / `reescritura` | `retriever_basico` | One technique alone | Does each technique help on its own? |
+| `sin_normalizacion` | `retriever_basico` | Retrieval with the raw chunk text | Does the defensive normalization help disguised attacks? |
+| `chunks_grandes` | `retriever_basico` | 1000-character chunks (overlap 200) instead of 500 | Is the attack diluted in larger chunks? |
+| `sin_ejemplos` | `base` | No known-attack retrieval (`top_k=0`) | Does the RAG of examples improve the LLM alone? |
+| `sin_literatura` | `base` | No literature retrieval | Does the literature help the analyst? |
+| `sin_verificador` | `base` | No confidence penalty, verified fragment not required | How much precision does the anti-hallucination check add? |
+| `prompt_sin_hard_negatives` | `base` | Prompt without the hard-negative policy and examples | Do the examples lower false positives on texts about attacks? |
 
 Folders that already have results are skipped (`--force` re-runs them), so a paid run is never
 repeated; `--summary-only` rebuilds the table. Variants marked `requires_llm` are skipped with
-`--retrieval-only`, since their retrieval equals the base.
+`--retrieval-only`. A run interrupted midway resumes from the last finished document
+(`predictions.partial.jsonl`).
 
 **Advanced RAG without an LLM** (knowledge base of known attacks only; each technique has its
-own switch, all off by default):
+own switch, all on by default):
 
-- `CF_QUERY_REWRITE`: split the chunk into sentences, score them with the labeling patterns
-  (instruction override, prompt leaking, role play, exfiltration, triggers, conditionals) plus
-  URLs, base64 and second-person address, and search the most suspicious ones separately
-  (`CF_QUERY_REWRITE_MAX_SENTENCES`, default 3). It only focuses the search; with no suspicious
-  sentence the whole chunk is searched.
+- `CF_QUERY_REWRITE`: the whole chunk is always searched, and its most suspicious sentences are
+  added as extra queries (`CF_QUERY_REWRITE_MAX_SENTENCES`, default 3), fused with RRF.
+  Sentences are scored with the labeling patterns (instruction override, prompt leaking, role
+  play, exfiltration, triggers, conditionals) plus URLs, base64, second-person address and code
+  that reaches the network, files or processes; fenced code blocks are kept whole. It only
+  focuses the search, it never decides anything.
 - `CF_HYBRID_SEARCH`: BM25 over the knowledge-base texts next to the embedding search, fused
   with Reciprocal Rank Fusion (`CF_RRF_K`, default 60).
 - `CF_RERANK`: a multilingual cross-encoder (`CF_RERANK_MODEL`, default
   `cross-encoder/mmarco-mMiniLMv2-L12-H384-v1`, ~470 MB, downloaded on first use) reorders a pool
-  of `CF_RERANK_CANDIDATES` (20) candidates; pairs are capped at 256 tokens.
+  of `CF_RERANK_CANDIDATES` (20) candidates, reading the focused sentences; pairs are capped at
+  256 tokens.
 
 Final examples keep the cosine similarity to the whole chunk, so scores stay comparable across
-configurations. First retriever results (190 documents, K = 3):
+configurations. Retriever results (190 documents, K = 3; *macro* = average over attack types,
+each weighing the same, since 77% of the knowledge base is direct injection):
 
-| Variant | Context Precision | Hit@1 | prompt leaking CP | trigger CP | Median latency / doc |
-|---|---|---|---|---|---|
-| base | 0.603 | 0.54 | 0.12 | 0.00 | 0.13 s |
-| rerank | 0.557 | 0.48 | 0.17 | 0.03 | 4.2 s |
-| hibrido | 0.652 | 0.58 | 0.12 | 0.28 | 0.14 s |
-| reescritura | 0.578 | 0.51 | 0.47 | 0.00 | 0.15 s |
-| hibrido_reescritura | 0.679 | 0.61 | 0.47 | 0.00 | 0.19 s |
-| rag_avanzado | **0.700** | **0.65** | **0.58** | **0.30** | 4.2 s |
+| Variant | Context Precision | CP macro | jailbreak | exfiltration | prompt leaking | trigger | Median latency / doc |
+|---|---|---|---|---|---|---|---|
+| `retriever_basico` | 0.603 | 0.420 | 0.44 | 0.58 | 0.12 | 0.00 | 0.13 s |
+| `hibrido` | 0.652 | 0.506 | 0.64 | 0.56 | 0.12 | 0.28 | 0.14 s |
+| `hibrido_reescritura` | 0.717 | 0.573 | **0.80** | **0.59** | 0.50 | 0.03 | 0.17 s |
+| **`base`** (+ reranking) | **0.717** | **0.619** | 0.59 | 0.56 | **0.61** | **0.40** | 4.2 s |
+| `rerank` alone | 0.557 | 0.382 | 0.36 | 0.43 | 0.17 | 0.03 | 4.2 s |
+| `reescritura` alone | 0.604 | 0.440 | 0.39 | 0.41 | 0.44 | 0.00 | 0.16 s |
 
-Latencies were measured on a 4-vCPU Linux VM; reranking is much faster natively.
+Each step of the chain raises the macro Context Precision (0.42 → 0.51 → 0.57 → 0.62). The
+reranker alone hurts (it is trained for question answering, not for "same attack type"), but on
+top of the other two it lifts the rarest types (trigger 0.03 → 0.40, prompt leaking 0.50 → 0.61)
+at the cost of jailbreak. Latencies were measured on a 4-vCPU Linux VM; reranking is much faster
+natively, and corpus inspection runs in batch before indexing.
 
 Retriever scores are read against **chance levels** (what a random retriever would hit given
 each type's share of the knowledge base: 77% of the examples are direct injection). The
@@ -374,50 +382,38 @@ category, type, position, subtlety, concealment, format, language and attack sou
 
 ---
 
-## Real vs. Mocked vs. Stubbed Modules
+## Module Status
 
 | Component | Status | Description |
 |---|---|---|
-| **Text & Markdown Loader** | **Real** | Full file ingestion, encoding handling, channel separation. |
-| **HTML Loader** | **Real / Hook** | Extracts visible text and HTML comments. Hooks provided for CSS steganography. |
-| **PDF Loader** | **Real / Hook** | Extracts page text and PDF metadata. Hooks provided for hidden layers. |
-| **Chunker** | **Real** | Overlapping window chunker with exact original character offset tracking. |
-| **Normalizer** | **Real Hooks** | Detects zero-width chars, base64 blobs, HTML comments, Unicode alterations. |
-| **Embedder** | **Mock (Real Code)** | Deterministic SHA256-based unit vector generation. Dimension configurable. |
-| **Vector Store** | **Real** | Local persistent ChromaDB using cosine distance and explicit vectors. |
-| **LLM Client** | **Mock (Real Code)** | Deterministic heuristic engine simulating structured LLM responses. |
-| **Verifier** | **Real** | Anti-hallucination engine verifying `fragmento_exacto` substring and character offsets. |
-| **JSON & Markdown Reporting** | **Real** | Serializes reports with Spanish JSON keys and renders human-readable Markdown. |
-| **Evaluation Metrics** | **Real** | Precision, Recall, F1, Accuracy, Hard Negative FPR, Attack Type Accuracy, Fragment Match Rate. |
-| **External KB Loaders** | **Stubs** | OWASP, MITRE, Deepset, BIPIA, and HackAPrompt loader stubs with `# TODO(team):` tags. |
-| **Cross-Chunk Aggregator** | **Working Stub** | Deduplication implemented; boundary stitching documented with strategy and TODO. |
+| **Text & Markdown Loader** | Real | File ingestion and encoding handling. |
+| **HTML Loader** | Real | Visible text plus hidden channel: comments and elements hidden by the `hidden` attribute or CSS (inline and `<style>` rules: display/visibility, opacity 0, font-size 0, white or transparent text, off-screen, zero clip). |
+| **PDF Loader** | Real | Character-level separation with pdfium: invisible render mode, transparent or white text, sub-1-pt glyphs and off-page text go to the hidden channel; document metadata too. |
+| **Chunker** | Real | Overlapping windows with exact character offsets. |
+| **Normalizer** | Real | Unicode Tags, invisible and bidi characters, NFKC, confusable folding, base64 decoding. |
+| **Embedder** | Real | Local `multilingual-e5-small` (default), proxy `text-embedding-3-small`, or mock for tests. |
+| **Vector Store** | Real | Local ChromaDB, cosine distance; collections `known_attacks` and `literatura`. |
+| **Advanced retrieval** | Real | Query rewriting, BM25 + RRF hybrid search and cross-encoder reranking. |
+| **LLM Client** | Real code, untested live | LiteLLM proxy with structured outputs, cache, usage ledger and budget cap; mock for offline runs. |
+| **Aggregator** | Real | Deduplication and stitching of payloads cut by a chunk boundary. |
+| **Verifier** | Real | Verbatim check in the visible and hidden channels; concealment tagging by hidden section. |
+| **Verdict** | Real | Configurable policy (threshold, verified fragment, minimum severity). |
+| **Knowledge base** | Real | 762 labeled examples (deepset, BIPIA, HackAPrompt, MITRE ATLAS, OWASP) and 1908 literature passages. |
+| **Evaluation** | Real | 190-document held-out dataset, class 11 metrics, ablation study. |
 
----
+### Checklist
 
-## Where to Plug in the Real Implementation (Checklist)
-
-To transition from the scaffold to production, implement the following components:
-
-- [ ] **LLM Provider (`src/corpus_forensics/llm/`)**:
-  - Implement a new `LLMClient` subclass in `src/corpus_forensics/llm/` (e.g. `openai_client.py`, `anthropic_client.py`, `vllm_client.py`).
-  - Register it in `src/corpus_forensics/llm/factory.py`.
-  - Set `CF_LLM_PROVIDER=<name>` in `.env`.
-- [ ] **Embedding Provider (`src/corpus_forensics/embeddings/`)**:
-  - Implement a real `Embedder` subclass (e.g. `openai_embeddings.py` or `huggingface_embeddings.py`).
-  - Register it in `src/corpus_forensics/embeddings/factory.py`.
-  - Set `CF_EMBEDDER_PROVIDER=<name>` in `.env`.
-- [ ] **HTML Hidden-Content Channel (`src/corpus_forensics/ingestion/html_loader.py`)**:
-  - Implement CSS style sheet parsing to detect `display:none`, `visibility:hidden`, font-size 0, off-screen absolute positions, and white-on-white text.
-- [ ] **PDF Advanced Forensics (`src/corpus_forensics/ingestion/pdf_loader.py`)**:
-  - Add extraction of invisible rendering layers (PDF mode 3), OCR for rasterized text, and raw object stream scanning.
-- [ ] **Preprocessing Normalizer (`src/corpus_forensics/preprocessing/normalizer.py`)**:
-  - Integrate homoglyph confusable matching and full language identification (e.g. `fasttext` or `lingua`).
-- [ ] **Cross-Chunk Stitching (`src/corpus_forensics/analysis/aggregator.py`)**:
-  - Complete adjacent-chunk fragment stitching for injections that cross chunk boundaries.
-- [ ] **External KB Loaders (`src/corpus_forensics/knowledge_base/loaders/`)**:
-  - Fill in the parser logic for OWASP Top 10, MITRE ATLAS, Deepset, BIPIA, and HackAPrompt.
-- [ ] **Analyst Prompt (`src/corpus_forensics/analysis/prompts/analyst_prompt.txt`)**:
-  - Tune few-shot examples and refine instructions for distinguishing hard negatives (academic security papers) from actual attacks.
+- [x] LLM provider (`llm/litellm_client.py`): pending only a live run with the course proxy.
+- [x] Embedding provider (`embeddings/local_embedder.py`, `embeddings/litellm_embedder.py`).
+- [x] HTML hidden-content channel (CSS rules and inline styles).
+- [x] PDF hidden text (render mode, color, size, position). Not covered: text drawn under an
+      opaque shape and OCR of rasterized text (would need full page rendering).
+- [x] Normalizer: confusables folded. Language identification and base64 entropy checks were
+      dropped on purpose: the embeddings are multilingual, non-Latin scripts are detected by
+      the labeling rules, and base64 is decoded rather than scored.
+- [x] Cross-chunk stitching. Not covered: payloads split across distant paragraphs.
+- [x] External knowledge-base loaders.
+- [x] Analyst prompt (hard negatives, untrusted-content rule, delimited references).
 
 ---
 

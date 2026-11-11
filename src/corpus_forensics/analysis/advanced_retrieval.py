@@ -5,9 +5,9 @@ combined (query rewriting -> hybrid search -> reranking):
 
 - Query rewriting (deterministic): a chunk is mostly benign text with the attack in one
   or two sentences, and its embedding is dominated by the benign part. The chunk is split
-  into sentences, each scored with simple signals (the labeling patterns for instruction
+  into sentences (fenced code blocks kept whole), each scored with simple signals (the labeling patterns for instruction
   override, prompt leaking, role play, exfiltration, triggers and conditionals, plus URLs,
-  base64 and second-person address), and the most suspicious sentences are searched
+  base64, second-person address and code that reaches the network, files or processes), and the most suspicious sentences are searched
   separately. It only focuses the search: it never decides anything, and with no
   suspicious sentence the whole chunk is searched as before.
 - Hybrid search: BM25 over the knowledge-base texts next to the embedding search, fused
@@ -40,6 +40,13 @@ TOKEN = re.compile(r"\w+", re.UNICODE)
 SENTENCE_SPLIT = re.compile(r"(?<=[.!?。！？])\s+|\n+")
 URL = re.compile(r"https?://|www\.", re.I)
 SECOND_PERSON = re.compile(r"\b(?:you|your|yourself|tú|usted|vos|du|dein\w*|ihr)\b", re.I)
+# code that reaches the network, files, processes, the screen or the keyboard
+RISKY_CODE = re.compile(
+    r"\b(?:requests\.\w+|urllib|socket|subprocess|os\.system|os\.popen|open_connection|"
+    r"start_server|\.connect\(|\.send(?:all)?\(|open\([^)]*\)|getpass|platform\.\w+|"
+    r"pyautogui|pynput|keyboard|clipboard|pbpaste|scp|rsync|ssh|ftplib|smtplib|paramiko)\b",
+    re.I,
+)
 SIGNALS: tuple[re.Pattern[str], ...] = (
     OVERRIDE,
     PROMPT_LEAK,
@@ -51,6 +58,7 @@ SIGNALS: tuple[re.Pattern[str], ...] = (
     URL,
     B64,
     SECOND_PERSON,
+    RISKY_CODE,
 )
 
 
@@ -62,9 +70,42 @@ def sentence_score(sentence: str) -> int:
     return sum(1 for pattern in SIGNALS if pattern.search(sentence))
 
 
+CODE_LINE = re.compile(
+    r"^\s*(?:import |from \S+ import |def |class |for |while |if .*:$|with |return |"
+    r"[\w.\[\]]+\s*=\s*\S|[\w.]+\(.*\)\s*$|[{}()\]]\s*$)"
+)
+
+
+def _looks_like_code(segment: str) -> bool:
+    lines = [line for line in segment.splitlines() if line.strip()]
+    return bool(lines) and sum(1 for line in lines if CODE_LINE.match(line)) >= max(
+        1, len(lines) // 2
+    )
+
+
+def split_segments(text: str) -> list[str]:
+    """Sentences of the prose, with each fenced code block kept whole.
+
+    Splitting code into "sentences" breaks snippets apart (an exfiltration snippet is one
+    unit), so text between ``` fences is one segment. A chunk can start or end inside a
+    block: with an odd number of fences the side that looks like code is taken as code.
+    """
+    parts = text.split("```")
+    code_first = len(parts) % 2 == 0 and _looks_like_code(parts[0])
+    segments: list[str] = []
+    for i, part in enumerate(parts):
+        is_code = (i % 2 == 0) if code_first else (i % 2 == 1)
+        if is_code:
+            if part.strip():
+                segments.append(part.strip())
+        else:
+            segments.extend(s.strip() for s in SENTENCE_SPLIT.split(part) if s and s.strip())
+    return segments
+
+
 def rewrite_query(text: str, max_sentences: int = 3) -> list[str]:
-    """The most suspicious sentences of a chunk, or the whole chunk if none is suspicious."""
-    sentences = [s.strip() for s in SENTENCE_SPLIT.split(text) if s and s.strip()]
+    """The most suspicious sentences (or code blocks) of a chunk, or the whole chunk."""
+    sentences = split_segments(text)
     scored = [(sentence_score(s), i, s) for i, s in enumerate(sentences)]
     suspicious = sorted((x for x in scored if x[0] > 0), key=lambda x: (-x[0], x[1]))
     if not suspicious:
