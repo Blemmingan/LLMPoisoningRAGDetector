@@ -1,7 +1,10 @@
 """Evaluation harness running the pipeline across the benchmark dataset."""
 
 import json
+import os
+import platform
 import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -64,6 +67,46 @@ def _git_commit() -> str | None:
     return out.stdout.strip() or None
 
 
+def _dir_size_mb(path: Path) -> float | None:
+    if not path.exists():
+        return None
+    total = sum(f.stat().st_size for f in path.rglob("*") if f.is_file())
+    return round(total / 1e6, 1)
+
+
+def _model_size_mb(name_or_path: str) -> float | None:
+    """Size of a local model folder, or of its Hugging Face cache entry."""
+    local = Path(name_or_path).expanduser()
+    if local.exists():
+        return _dir_size_mb(local)
+    cache = Path(os.environ.get("HF_HOME", Path.home() / ".cache" / "huggingface")) / "hub"
+    return _dir_size_mb(cache / f"models--{name_or_path.replace('/', '--')}")
+
+
+def peak_memory_mb() -> float | None:
+    """Peak resident memory of this process (ru_maxrss: KB on Linux, bytes on macOS)."""
+    try:
+        import resource  # noqa: PLC0415
+    except ImportError:  # Windows
+        return None
+    peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    return round(peak / (1e6 if sys.platform == "darwin" else 1e3), 1)
+
+
+def resource_usage(settings: Settings) -> dict[str, Any]:
+    """Memory and disk footprint of the run (computational cost analysis)."""
+    return {
+        "memoria_pico_mb": peak_memory_mb(),
+        "indice_vectorial_mb": _dir_size_mb(Path(settings.vectorstore_dir)),
+        "modelo_embeddings_mb": _model_size_mb(settings.local_embedding_model)
+        if settings.embedder_provider == "local"
+        else None,
+        "modelo_reranker_mb": _model_size_mb(settings.rerank_model) if settings.rerank else None,
+        "cpu_logicos": os.cpu_count(),
+        "plataforma": f"{platform.system()} {platform.machine()}",
+    }
+
+
 def run_config(
     settings: Settings, pipeline: ForensicPipeline, dataset_dir: Path, retrieval_only: bool
 ) -> dict[str, Any]:
@@ -122,6 +165,7 @@ class EvaluationHarness:
         output_dir: Path | str | None = None,
         retrieval_only: bool = False,
         extra_config: dict[str, Any] | None = None,
+        sample_size: int | None = None,
     ) -> dict[str, Any]:
         """Run the pipeline over the dataset, then write predictions and metrics.
 
@@ -131,6 +175,8 @@ class EvaluationHarness:
             retrieval_only: Only load, chunk and retrieve (no LLM call, no cost): measures
                 the retriever.
             extra_config: Extra entries for run_config.json (e.g. the ablation variant).
+            sample_size: Evaluate only this many documents, evenly spaced over the dataset
+                (labels are grouped by category, so every category is represented).
         """
         settings = self.pipeline.settings
         dataset_path = Path(dataset_dir)
@@ -138,9 +184,14 @@ class EvaluationHarness:
         samples = EvalDatasetLoader(dataset_path).load()
         if not samples:
             raise ValueError(f"No evaluation samples loaded from {dataset_dir}")
+        if sample_size is not None and 0 < sample_size < len(samples):
+            step = len(samples) / sample_size
+            samples = [samples[int(i * step)] for i in range(sample_size)]
 
         config = run_config(settings, self.pipeline, dataset_path, retrieval_only)
         config.update(extra_config or {})
+        if sample_size is not None:
+            config["muestra"] = len(samples)
         done = self._resume(out_path, config)
 
         ledger = settings.usage_ledger_path
@@ -163,6 +214,8 @@ class EvaluationHarness:
                 traces=traces,
                 latency_s=round(time.perf_counter() - start, 4),
                 usage=_usage_delta(_ledger_records(ledger, before)),
+                timings=dict(getattr(self.pipeline, "last_timings", {}) or {}),
+                tokens_estimados=dict(getattr(self.pipeline, "last_token_estimate", {}) or {}),
             )
             # appended as soon as it is ready: an interrupted run resumes from here
             with open(partial, "a", encoding="utf-8") as f:
@@ -170,6 +223,7 @@ class EvaluationHarness:
             done[record.documento] = record
 
         records = [done[s.label.documento] for s in samples]
+        config["recursos"] = resource_usage(settings)
         result = write_outputs(records, config, out_path)
         partial.unlink(missing_ok=True)
         (out_path / PARTIAL_CONFIG_FILE).unlink(missing_ok=True)

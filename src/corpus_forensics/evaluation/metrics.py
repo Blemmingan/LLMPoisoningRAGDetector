@@ -487,18 +487,118 @@ def ability_metrics(records: list[PredictionRecord]) -> dict[str, Any]:
 # --------------------------------------------------------------------------- cost, slices
 
 
+# Completion tokens per analyst call until a real run measures them: a clean chunk answers
+# with a short rationale and an empty list (~50 tokens); a finding adds ~200. With ~85% of
+# chunks clean, ~120 per call is used. Replaced by the ledger average when there is one.
+ASSUMED_COMPLETION_TOKENS = 120
+PROJECTION_MODELS = ("gpt-4o-mini", "gpt-4.1-nano", "gpt-4.1-mini")
+TOKEN_SECTIONS = (
+    "plantilla",
+    "chunk",
+    "vista_normalizada",
+    "ejemplos",
+    "literatura",
+    "schema",
+)
+
+
+def _percentile(values: list[float], q: float) -> float:
+    ordered = sorted(values)
+    return ordered[min(len(ordered) - 1, math.ceil(q * len(ordered)) - 1)] if ordered else 0.0
+
+
+def stage_metrics(records: list[PredictionRecord]) -> dict[str, Any]:
+    """Seconds per stage: total, mean per document and share of the pipeline time."""
+    totals: dict[str, float] = defaultdict(float)
+    for record in records:
+        for stage, seconds in record.timings.items():
+            totals[stage] += seconds
+    top_level = {k: v for k, v in totals.items() if not k.startswith("ejemplos.")}
+    pipeline_total = sum(top_level.values())
+    n = len(records) or 1
+    return {
+        stage: {
+            "total_s": round(seconds, 2),
+            "media_por_doc_s": round(seconds / n, 4),
+            "proporcion": round(seconds / pipeline_total, 4) if pipeline_total else None,
+        }
+        for stage, seconds in sorted(totals.items(), key=lambda kv: -kv[1])
+    }
+
+
+def token_metrics(records: list[PredictionRecord]) -> dict[str, Any]:
+    """Estimated analyst-prompt tokens (per call, per document) and measured ones if any."""
+    with_estimate = [r for r in records if r.tokens_estimados.get("llamadas")]
+    calls = sum(r.tokens_estimados["llamadas"] for r in with_estimate)
+    if not calls:
+        return {}
+    section_totals = {
+        key: sum(r.tokens_estimados.get(key, 0) for r in with_estimate) for key in TOKEN_SECTIONS
+    }
+    input_total = sum(r.tokens_estimados.get("total_entrada", 0) for r in with_estimate)
+    measured_calls = sum(r.usage.calls - r.usage.cached_calls for r in records)
+    measured_prompt = sum(r.usage.prompt_tokens for r in records)
+    measured_completion = sum(r.usage.completion_tokens for r in records)
+    return {
+        "llamadas_estimadas": calls,
+        "entrada_por_llamada": round(input_total / calls, 1),
+        "entrada_por_documento": round(input_total / len(with_estimate), 1),
+        "llamadas_por_documento": round(calls / len(with_estimate), 2),
+        "por_seccion_por_llamada": {
+            key: round(total / calls, 1) for key, total in section_totals.items()
+        },
+        "proporcion_por_seccion": {
+            key: round(total / input_total, 4) if input_total else None
+            for key, total in section_totals.items()
+        },
+        "salida_por_llamada": round(measured_completion / measured_calls, 1)
+        if measured_calls
+        else ASSUMED_COMPLETION_TOKENS,
+        "salida_supuesta": not measured_calls,
+        "medido": {
+            "llamadas": measured_calls,
+            "entrada_por_llamada": round(measured_prompt / measured_calls, 1)
+            if measured_calls
+            else None,
+        },
+    }
+
+
+def cost_projection(tokens: dict[str, Any], measured_usd_per_doc: float | None) -> dict[str, Any]:
+    """USD per document and per 1,000 / 10,000 documents for each candidate model."""
+    from corpus_forensics.llm.usage import APPROX_PRICES_PER_MTOK  # noqa: PLC0415
+
+    if not tokens:
+        return {}
+    calls = tokens["llamadas_por_documento"]
+    tokens_in = tokens["entrada_por_llamada"] * calls
+    tokens_out = tokens["salida_por_llamada"] * calls
+    models = {}
+    for model in PROJECTION_MODELS:
+        price_in, price_out = APPROX_PRICES_PER_MTOK[model]
+        per_doc = (tokens_in * price_in + tokens_out * price_out) / 1e6
+        models[model] = {
+            "usd_por_documento": round(per_doc, 6),
+            "usd_por_1000_documentos": round(per_doc * 1000, 3),
+            "usd_por_10000_documentos": round(per_doc * 10000, 2),
+        }
+    return {
+        "tokens_entrada_por_documento": round(tokens_in, 1),
+        "tokens_salida_por_documento": round(tokens_out, 1),
+        "modelos": models,
+        "usd_por_documento_medido": measured_usd_per_doc,
+    }
+
+
 def cost_metrics(records: list[PredictionRecord]) -> dict[str, Any]:
-    latencies = sorted(r.latency_s for r in records)
-    p95 = (
-        latencies[min(len(latencies) - 1, math.ceil(0.95 * len(latencies)) - 1)]
-        if latencies
-        else 0.0
-    )
+    latencies = [r.latency_s for r in records]
     reports = [r.report for r in records if r.report is not None]
+    total_usd = sum(r.usage.cost_usd for r in records)
+    tokens = token_metrics(records)
     return {
         "latencia_s": {
             "mediana": round(median(latencies), 3) if latencies else None,
-            "p95": round(p95, 3),
+            "p95": round(_percentile(latencies, 0.95), 3),
             "total": round(sum(latencies), 1),
         },
         "chunks": sum(len(r.traces) for r in records),
@@ -507,10 +607,13 @@ def cost_metrics(records: list[PredictionRecord]) -> dict[str, Any]:
         "llamadas_en_cache": sum(r.usage.cached_calls for r in records),
         "tokens_prompt": sum(r.usage.prompt_tokens for r in records),
         "tokens_completion": sum(r.usage.completion_tokens for r in records),
-        "costo_usd": round(sum(r.usage.cost_usd for r in records), 4),
-        "costo_usd_por_documento": round(sum(r.usage.cost_usd for r in records) / len(records), 5)
-        if records
-        else 0.0,
+        "costo_usd": round(total_usd, 4),
+        "costo_usd_por_documento": round(total_usd / len(records), 5) if records else 0.0,
+        "etapas": stage_metrics(records),
+        "tokens": tokens,
+        "proyeccion": cost_projection(
+            tokens, round(total_usd / len(records), 6) if records and total_usd else None
+        ),
     }
 
 

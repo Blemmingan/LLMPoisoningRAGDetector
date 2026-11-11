@@ -240,28 +240,8 @@ def render_markdown(metrics: EvaluationMetrics) -> str:
             ),
             "",
         ]
-    c = metrics.cost
+    parts += [render_cost(metrics, heading="## 5. Costo computacional y tokens"), ""]
     parts += [
-        "## 5. Costo",
-        "",
-        _table(
-            ["Métrica", "Valor"],
-            [
-                [
-                    "Latencia mediana / p95 (s)",
-                    f"{_fmt(c['latencia_s']['mediana'])} / {_fmt(c['latencia_s']['p95'])}",
-                ],
-                ["Tiempo total (s)", c["latencia_s"]["total"]],
-                ["Chunks / fallidos", f"{c['chunks']} / {c['chunks_fallidos']}"],
-                ["Llamadas al modelo (en caché)", f"{c['llamadas']} ({c['llamadas_en_cache']})"],
-                ["Tokens prompt / completion", f"{c['tokens_prompt']} / {c['tokens_completion']}"],
-                [
-                    "Costo total / por documento (USD)",
-                    f"{c['costo_usd']} / {c['costo_usd_por_documento']}",
-                ],
-            ],
-        ),
-        "",
         "## 6. Porciones",
         "",
         "Recall sobre envenenados y FPR sobre el resto, con intervalo de Wilson al 95%.",
@@ -288,3 +268,168 @@ def render_markdown(metrics: EvaluationMetrics) -> str:
             "",
         ]
     return "\n".join(parts)
+
+
+STAGE_LABELS = {
+    "carga": "Carga del documento",
+    "chunking_normalizacion": "Chunking y normalización",
+    "embedding_chunk": "Embedding del chunk",
+    "recuperacion_ejemplos": "Recuperación de ejemplos (total)",
+    "ejemplos.embedding_consultas_extra": "  · embedding de consultas extra (reescritura)",
+    "ejemplos.busqueda_densa": "  · búsqueda densa",
+    "ejemplos.bm25": "  · BM25",
+    "ejemplos.reranker": "  · reranker",
+    "recuperacion_literatura": "Recuperación de literatura",
+    "llm_analista": "LLM analista",
+    "agregacion_verificacion": "Agregación y verificación",
+}
+SECTION_LABELS = {
+    "plantilla": "Plantilla e instrucciones",
+    "chunk": "Texto del chunk",
+    "vista_normalizada": "Vista normalizada",
+    "ejemplos": "Ejemplos recuperados",
+    "literatura": "Pasajes de literatura",
+    "schema": "Schema de salida estructurada",
+}
+
+
+def _mb(value: Any) -> str:
+    return "—" if value is None else f"{value:.0f}"
+
+
+def render_cost(metrics: EvaluationMetrics, heading: str = "# Costo computacional y tokens") -> str:
+    """Computational cost and token usage (extra 1.2.1 of the assignment)."""
+    c = metrics.cost
+    cfg = metrics.config
+    res = cfg.get("recursos") or {}
+    lines = [
+        heading,
+        "",
+        f"{metrics.total_samples} documentos, {c['chunks']} chunks. "
+        f"Latencia por documento: mediana {_fmt(c['latencia_s']['mediana'])} s, "
+        f"p95 {_fmt(c['latencia_s']['p95'])} s (total {c['latencia_s']['total']} s).",
+        "",
+    ]
+    stages = c.get("etapas") or {}
+    if stages:
+        order = [k for k in STAGE_LABELS if k in stages] + [
+            k for k in stages if k not in STAGE_LABELS
+        ]
+        lines += [
+            "### Tiempo por etapa",
+            "",
+            _table(
+                ["Etapa", "Media por documento (s)", "Proporción del tiempo"],
+                [
+                    [
+                        STAGE_LABELS.get(k, k),
+                        f"{stages[k]['media_por_doc_s']:.3f}",
+                        f"{stages[k]['proporcion']:.1%}"
+                        if stages[k]["proporcion"] is not None
+                        else "—",
+                    ]
+                    for k in order
+                ],
+            ),
+            "",
+        ]
+        if cfg.get("llm_is_mock") and "llm_analista" in stages:
+            lines += [
+                "> El tiempo del LLM corresponde al mock; con el LLM real domina la latencia.",
+                "",
+            ]
+    tokens = c.get("tokens") or {}
+    if tokens:
+        sections = tokens["por_seccion_por_llamada"]
+        shares = tokens["proporcion_por_seccion"]
+        measured = tokens["medido"]
+        lines += [
+            "### Tokens del prompt del analista",
+            "",
+            f"Contados localmente con el tokenizador del modelo ({cfg.get('llm_model') or 'gpt-4o-mini'}), "
+            f"sin llamar a la API: {tokens['entrada_por_llamada']:.0f} tokens de entrada por llamada, "
+            f"{tokens['llamadas_por_documento']} llamadas (chunks) por documento, "
+            f"{tokens['entrada_por_documento']:.0f} tokens de entrada por documento.",
+            "",
+            _table(
+                ["Sección", "Tokens por llamada", "Proporción"],
+                [
+                    [
+                        SECTION_LABELS.get(k, k),
+                        f"{sections[k]:.0f}",
+                        f"{shares[k]:.1%}" if shares[k] is not None else "—",
+                    ]
+                    for k in sections
+                ],
+            ),
+            "",
+            (
+                f"Salida: {tokens['salida_por_llamada']:.0f} tokens por llamada "
+                + (
+                    "(supuesto hasta medirlo con el LLM real)."
+                    if tokens["salida_supuesta"]
+                    else "(medido)."
+                )
+            ),
+        ]
+        if measured.get("llamadas"):
+            lines += [
+                f"Medido en el ledger: {measured['llamadas']} llamadas pagas, "
+                f"{_fmt(measured['entrada_por_llamada'])} tokens de entrada por llamada "
+                f"(estimado: {tokens['entrada_por_llamada']:.0f}).",
+            ]
+        lines.append("")
+    projection = c.get("proyeccion") or {}
+    if projection:
+        lines += [
+            "### Proyección de costo del LLM",
+            "",
+            f"Por documento: {projection['tokens_entrada_por_documento']:.0f} tokens de entrada y "
+            f"{projection['tokens_salida_por_documento']:.0f} de salida (precios aproximados por millón de tokens).",
+            "",
+            _table(
+                [
+                    "Modelo",
+                    "USD por documento",
+                    "USD por 1.000 documentos",
+                    "USD por 10.000 documentos",
+                ],
+                [
+                    [
+                        model,
+                        f"{v['usd_por_documento']:.5f}",
+                        f"{v['usd_por_1000_documentos']:.2f}",
+                        f"{v['usd_por_10000_documentos']:.2f}",
+                    ]
+                    for model, v in projection["modelos"].items()
+                ],
+            ),
+            "",
+        ]
+        if projection.get("usd_por_documento_medido"):
+            lines += [
+                f"Costo medido en esta corrida: {projection['usd_por_documento_medido']} USD por documento.",
+                "",
+            ]
+    if res:
+        lines += [
+            "### Recursos",
+            "",
+            _table(
+                ["Recurso", "Valor"],
+                [
+                    ["Memoria pico del proceso (MB)", _mb(res.get("memoria_pico_mb"))],
+                    ["Índice vectorial en disco (MB)", _mb(res.get("indice_vectorial_mb"))],
+                    ["Modelo de embeddings (MB)", _mb(res.get("modelo_embeddings_mb"))],
+                    ["Modelo reranker (MB)", _mb(res.get("modelo_reranker_mb"))],
+                    ["CPU lógicos", str(res.get("cpu_logicos"))],
+                    ["Plataforma", str(res.get("plataforma"))],
+                ],
+            ),
+            "",
+        ]
+    lines += [
+        f"Llamadas al modelo: {c['llamadas']} ({c['llamadas_en_cache']} en caché); "
+        f"costo total medido {c['costo_usd']} USD.",
+    ]
+    return "\n".join(lines)
