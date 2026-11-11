@@ -8,6 +8,7 @@ from typing import Annotated, Any
 import typer
 from rich import print as rprint
 from rich.console import Console
+from rich.markdown import Markdown
 from rich.markup import escape
 from rich.table import Table
 
@@ -456,6 +457,40 @@ def eval_ablation(
     rprint(f"[dim]Summary: {out / 'ablation_summary.md'}[/dim]")
 
 
+@eval_app.command(name="cost")
+def eval_cost(
+    dataset: Annotated[Path, typer.Option("--dataset", "-d", help="Labeled dataset.")] = Path(
+        "data/eval/v1"
+    ),
+    out: Annotated[Path, typer.Option("--out", "-o", help="Output folder.")] = Path("reports/cost"),
+    sample: Annotated[
+        int, typer.Option("--sample", help="Documents to measure (0 = all), evenly spaced.")
+    ] = 40,
+    predictions: Annotated[
+        Path | None,
+        typer.Option("--predictions", "-p", help="Use a saved run instead of measuring again."),
+    ] = None,
+) -> None:
+    """Computational cost and token usage: time per stage, prompt tokens, cost projection.
+
+    Measures the pipeline without calling the LLM (prompts are built and counted locally),
+    or reads a saved run (e.g. one with the real LLM, to compare estimated and measured).
+    """
+    from corpus_forensics.evaluation.harness import recompute
+    from corpus_forensics.evaluation.report import render_cost
+
+    if predictions is not None:
+        results = recompute(predictions, out)
+    else:
+        results = EvaluationHarness().run(
+            dataset_dir=dataset, output_dir=out, retrieval_only=True, sample_size=sample or None
+        )
+    report = out / "cost_report.md"
+    report.write_text(render_cost(results["metrics"]) + "\n", encoding="utf-8")
+    console.print(Markdown(render_cost(results["metrics"])))
+    rprint(f"\n[dim]Cost report: {report}[/dim]")
+
+
 @eval_app.command(name="metrics")
 def eval_metrics(
     predictions: Annotated[
@@ -509,6 +544,22 @@ def _print_metrics(results: dict[str, Any]) -> None:
     rprint(f"\n[dim]Predictions: {results['predictions']}[/dim]")
     rprint(f"[dim]Summary JSON: {results['json_summary']}[/dim]")
     rprint(f"[dim]Summary Markdown: {results['markdown_summary']}[/dim]")
+
+
+@app.command(name="ui")
+def ui(
+    port: Annotated[int, typer.Option("--port", help="Local port.")] = 8501,
+) -> None:
+    """Open the web interface (Streamlit) in the browser."""
+    import subprocess
+    import sys
+
+    app_path = Path(__file__).resolve().parent / "ui" / "app.py"
+    rprint(f"[cyan]Opening http://localhost:{port} (Ctrl+C to stop)[/cyan]")
+    subprocess.run(
+        [sys.executable, "-m", "streamlit", "run", str(app_path), "--server.port", str(port)],
+        check=False,
+    )
 
 
 # -----------------------------------------------------------------------------

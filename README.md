@@ -382,6 +382,51 @@ category, type, position, subtlety, concealment, format, language and attack sou
 
 ---
 
+### 6. Computational Cost and Token Usage
+
+```bash
+# measure the pipeline without calling the LLM (prompts are built and counted locally)
+uv run corpus-forensics eval cost --sample 40 --out reports/cost
+# read a saved run instead (e.g. one with the real LLM, to compare estimated vs measured)
+uv run corpus-forensics eval cost --predictions reports/eval/predictions.jsonl --out reports/cost
+```
+
+`cost_report.md` (also section 5 of every `eval_summary.md`) reports:
+
+- **Time per stage** (load, chunking, chunk embedding, example retrieval with its sub-stages
+  - extra query embeddings, dense search, BM25, reranker -, literature retrieval, LLM,
+  aggregation and verification): mean per document and share of the pipeline time.
+- **Analyst prompt tokens**, counted with the model's tokenizer (`o200k_base` for
+  gpt-4o-mini) and split by section: template, chunk, normalized view, retrieved examples,
+  literature passages and the structured-output schema. Output tokens are assumed (120 per
+  call) until a real run measures them from the usage ledger.
+- **Cost projection** per document and per 1,000 / 10,000 documents for gpt-4o-mini,
+  gpt-4.1-nano and gpt-4.1-mini, and the measured cost when there is one.
+- **Resources**: peak memory, vector index size, embedding and reranker model sizes.
+
+First measurement (40-document stratified sample, default configuration, 4-vCPU Linux VM):
+the reranker takes 91% of the processing time (4.3 of 4.7 s per document; everything else
+is under 0.5 s). Each analyst call carries ~2,600 input tokens, 67% of them fixed (template
+37%, output schema 30%) and only 4% chunk text; with ~5 chunks per document the projected
+cost is about USD 2.3 per 1,000 documents with gpt-4o-mini. Placing the fixed instructions
+before the chunk would let the provider's prompt caching discount them.
+
+### 7. Web Interface
+
+```bash
+uv run corpus-forensics ui          # opens http://localhost:8501
+```
+
+A Streamlit app to analyze one document (upload a TXT, Markdown, HTML or PDF file, or pick
+one from the evaluation dataset, which also shows its ground-truth label). It shows the
+verdict, the findings (type, severity, confidence, concealment, verified fragment, objective,
+mitigation and its cited source), the document's visible text and hidden channel with the
+findings highlighted, the examples retrieved for each chunk, and downloads the JSON and
+Markdown reports. The sidebar toggles the Advanced RAG techniques and the verdict policy. A
+second tab renders the evaluation, ablation and cost reports found under `reports/`.
+
+---
+
 ## Module Status
 
 | Component | Status | Description |
@@ -400,6 +445,8 @@ category, type, position, subtlety, concealment, format, language and attack sou
 | **Verdict** | Real | Configurable policy (threshold, verified fragment, minimum severity). |
 | **Knowledge base** | Real | 762 labeled examples (deepset, BIPIA, HackAPrompt, MITRE ATLAS, OWASP) and 1908 literature passages. |
 | **Evaluation** | Real | 190-document held-out dataset, class 11 metrics, ablation study. |
+| **Cost analysis** | Real | Time per stage, prompt tokens by section, cost projection, resources (`eval cost`). |
+| **Web interface** | Real | Streamlit app (`corpus-forensics ui`). |
 
 ### Checklist
 

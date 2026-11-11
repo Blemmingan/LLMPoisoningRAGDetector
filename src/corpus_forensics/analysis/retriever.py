@@ -7,6 +7,7 @@ from corpus_forensics.analysis.advanced_retrieval import (
     reciprocal_rank_fusion,
     rewrite_query,
 )
+from corpus_forensics.analysis.timing import StageTimer
 from corpus_forensics.embeddings.base import Embedder
 from corpus_forensics.schemas import Chunk, RetrievedAttack
 from corpus_forensics.vectorstore.base import VectorStore
@@ -60,6 +61,7 @@ class AttackRetriever:
         self.reranker = reranker
         self.rerank_candidates = rerank_candidates
         self._bm25: BM25Index | None = None
+        self.timer = StageTimer()  # sub-stages of the advanced retrieval
 
     def query_text(self, chunk: Chunk) -> str:
         """Text used to search: the normalized view when enabled and available."""
@@ -120,12 +122,18 @@ class AttackRetriever:
         entries: dict[str, RetrievedAttack] = {}
         rankings: list[list[str]] = []
         for query in queries:
-            embedding = chunk_embedding if query == base_query else self.embedder.embed_query(query)
-            dense = self.vector_store.query(query_embedding=embedding, top_k=pool)
+            if query == base_query:
+                embedding = chunk_embedding
+            else:
+                with self.timer.stage("embedding_consultas_extra"):
+                    embedding = self.embedder.embed_query(query)
+            with self.timer.stage("busqueda_densa"):
+                dense = self.vector_store.query(query_embedding=embedding, top_k=pool)
             entries.update({a.attack_id: a for a in dense})
             rankings.append([a.attack_id for a in dense])
             if self.hybrid_search:
-                lexical = self._bm25_index().search(query, pool)
+                with self.timer.stage("bm25"):
+                    lexical = self._bm25_index().search(query, pool)
                 entries.update({a.attack_id: a for a, _ in lexical if a.attack_id not in entries})
                 rankings.append([a.attack_id for a, _ in lexical])
         candidates = (
@@ -136,7 +144,8 @@ class AttackRetriever:
         if self.reranker is not None and candidates:
             # the reranker reads the focused sentences when there are any
             focus = " ".join(queries[1:]) or base_query
-            scores = self.reranker.score(focus, [entries[c].text for c in candidates])
+            with self.timer.stage("reranker"):
+                scores = self.reranker.score(focus, [entries[c].text for c in candidates])
             rerank_scores = dict(zip(candidates, scores, strict=True))
             candidates = sorted(candidates, key=lambda c: -rerank_scores[c])
 

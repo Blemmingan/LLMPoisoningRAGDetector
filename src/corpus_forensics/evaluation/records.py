@@ -35,6 +35,13 @@ class PredictionRecord(BaseModel):
     traces: list[ChunkTrace] = Field(default_factory=list)
     latency_s: float = 0.0
     usage: UsageDelta = Field(default_factory=UsageDelta)
+    timings: dict[str, float] = Field(
+        default_factory=dict, description="Seconds per pipeline stage for this document"
+    )
+    tokens_estimados: dict[str, int] = Field(
+        default_factory=dict,
+        description="Analyst prompt tokens counted locally (by section), before any call",
+    )
 
 
 def write_records(records: list[PredictionRecord], path: Path) -> None:
