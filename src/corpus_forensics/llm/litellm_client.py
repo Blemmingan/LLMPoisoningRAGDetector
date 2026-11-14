@@ -81,10 +81,15 @@ def build_usage_tracker(settings: Settings) -> UsageTracker:
 
 
 def build_openai_client(settings: Settings) -> OpenAI:
-    """Create an OpenAI SDK client pointed at the LiteLLM proxy."""
+    """Create an OpenAI SDK client for the configured endpoint.
+
+    Works with the course's LiteLLM proxy and with OpenAI directly
+    (CF_LLM_BASE_URL=https://api.openai.com/v1); without the proxy's cost header the
+    cost of each call is estimated from the token counts and the price table.
+    """
     if not settings.llm_base_url or settings.llm_api_key is None:
         raise ValueError(
-            "LiteLLM proxy not configured: set CF_LLM_BASE_URL and CF_LLM_API_KEY in .env"
+            "LLM endpoint not configured: set CF_LLM_BASE_URL and CF_LLM_API_KEY in .env"
         )
     return OpenAI(
         base_url=settings.llm_base_url,
@@ -106,7 +111,7 @@ def cost_from_headers(headers: Any) -> float | None:
 
 
 class LiteLLMClient(LLMClient):
-    """Structured-output chat client for the LiteLLM proxy."""
+    """Structured-output chat client for an OpenAI-compatible endpoint (OpenAI or LiteLLM)."""
 
     def __init__(
         self,
@@ -127,7 +132,8 @@ class LiteLLMClient(LLMClient):
 
     @property
     def provider_name(self) -> str:
-        return "litellm"
+        """'openai' when pointed at api.openai.com, 'litellm' for the course proxy."""
+        return "openai" if "api.openai.com" in (self.settings.llm_base_url or "") else "litellm"
 
     @property
     def is_mock(self) -> bool:

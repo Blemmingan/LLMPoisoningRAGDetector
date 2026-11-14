@@ -10,6 +10,8 @@ from corpus_forensics.llm.mock import MockLLMClient
 _LLM_REGISTRY: dict[str, Callable[..., LLMClient] | type[LLMClient]] = {
     "mock": MockLLMClient,
     "litellm": LiteLLMClient,
+    # same OpenAI-compatible client pointed at api.openai.com (CF_LLM_BASE_URL)
+    "openai": LiteLLMClient,
 }
 
 

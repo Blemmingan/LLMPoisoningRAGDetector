@@ -134,8 +134,11 @@ class Settings(BaseSettings):
     )
 
     # LiteLLM proxy (OpenAI-compatible) credentials and model names
-    llm_base_url: str | None = Field(default=None, description="Base URL of the LiteLLM proxy")
-    llm_api_key: SecretStr | None = Field(default=None, description="API key for the LiteLLM proxy")
+    llm_base_url: str | None = Field(
+        default=None,
+        description="Base URL of the OpenAI-compatible endpoint (OpenAI or the LiteLLM proxy)",
+    )
+    llm_api_key: SecretStr | None = Field(default=None, description="API key for that endpoint")
     llm_model: str | None = Field(default=None, description="Chat model name exposed by the proxy")
     embedding_model: str | None = Field(
         default=None, description="Embedding model name exposed by the proxy"

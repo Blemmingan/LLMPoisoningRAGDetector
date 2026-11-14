@@ -11,6 +11,7 @@ from corpus_forensics.embeddings.mock import MockEmbedder
 _EMBEDDER_REGISTRY: dict[str, Callable[..., Embedder] | type[Embedder]] = {
     "mock": MockEmbedder,
     "litellm": LiteLLMEmbedder,
+    "openai": LiteLLMEmbedder,  # same client against api.openai.com
     "local": LocalEmbedder,
 }
 

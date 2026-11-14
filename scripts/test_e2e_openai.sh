@@ -26,6 +26,9 @@ RESET="\033[0m"
 # Script tracking
 SCRIPT_START_TIME=$(date +%s)
 REPORTS_DIR="reports/e2e_openai_test"
+# Stage 1 resets the knowledge base: use a throwaway vector store so the real index
+# (762 examples + literature in data/vectorstore) is never wiped by this test.
+export CF_VECTORSTORE_DIR="${REPORTS_DIR}/vectorstore"
 
 # Helper functions
 log_header() {
